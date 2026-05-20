@@ -1,0 +1,28 @@
+<ResourceDictionary xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+                    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+
+    <SolidColorBrush x:Key="WindowBackground" Color="White"/>
+    <SolidColorBrush x:Key="PrimaryText" Color="#1C1C1E"/>
+    <SolidColorBrush x:Key="SecondaryText" Color="#8E8E93"/>
+    <SolidColorBrush x:Key="SurfaceColor" Color="#F2F2F7"/>
+    <SolidColorBrush x:Key="SurfaceHover" Color="#E5E5EA"/>
+    <SolidColorBrush x:Key="CardBackground" Color="#F2F2F7"/>
+    <SolidColorBrush x:Key="AccentBlue" Color="#007AFF"/>
+    <SolidColorBrush x:Key="AccentGreen" Color="#34C759"/>
+    <SolidColorBrush x:Key="PomodoroRed" Color="#AF4949"/>
+    <SolidColorBrush x:Key="SegIndicatorBg" Color="White"/>
+    <SolidColorBrush x:Key="ToggleTrackOff" Color="#E9E9EB"/>
+    <SolidColorBrush x:Key="ToggleThumb" Color="White"/>
+    <SolidColorBrush x:Key="DividerColor" Color="#F2F2F7"/>
+    <SolidColorBrush x:Key="PowerIconStroke" Color="#8E8E93"/>
+    <SolidColorBrush x:Key="PowerIconFill" Color="#F2F2F7"/>
+    <SolidColorBrush x:Key="PowerIconStrokeOutline" Color="#E5E5EA"/>
+
+    <Color x:Key="WindowBackgroundColor">White</Color>
+    <Color x:Key="PomodoroRedColor">#AF4949</Color>
+    <Color x:Key="PrimaryTextColor">#1C1C1E</Color>
+    <Color x:Key="AccentBlueColor">#007AFF</Color>
+    <Color x:Key="PowerIconFillColor">#F2F2F7</Color>
+    <Color x:Key="PowerIconStrokeColor">#8E8E93</Color>
+
+</ResourceDictionary>
