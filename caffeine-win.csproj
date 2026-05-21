@@ -12,7 +12,7 @@
     <IncludeNativeLibrariesForSelfExtract>true</IncludeNativeLibrariesForSelfExtract>
     <EnableCompressionInSingleFile>true</EnableCompressionInSingleFile>
 
-    <Version>1.0.0</Version>
+    <Version>1.1.0</Version>
     <Authors>Somesh Kumar</Authors>
     <Description>A lightweight Windows system tray application that keeps your screen awake.</Description>
     <PackageLicenseExpression>MIT</PackageLicenseExpression>
