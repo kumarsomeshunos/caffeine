@@ -98,6 +98,8 @@ public partial class App : Application
 
         _trayIcon.MouseClick += OnTrayClick;
         _trayIcon.MouseDoubleClick += OnTrayDoubleClick;
+
+        ShowMainWindow();
     }
 
     private void OnTrayClick(object? sender, WinForms.MouseEventArgs e)

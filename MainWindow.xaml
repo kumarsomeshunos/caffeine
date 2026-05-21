@@ -3,7 +3,7 @@
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         xmlns:local="clr-namespace:CaffeineWin.Controls"
         Title="Caffeine"
-        Width="380" Height="580"
+        Width="380" Height="500"
         WindowStyle="None"
         AllowsTransparency="True"
         Background="Transparent"
@@ -419,9 +419,9 @@
                             </Border>
                             <StackPanel x:Name="SegPanel" Orientation="Horizontal">
                                 <RadioButton x:Name="TabCaffeine" Content="Caffeine" GroupName="Tabs" IsChecked="True"
-                                             Style="{StaticResource SegmentStyle}" Checked="Tab_Changed"/>
+                                             Style="{StaticResource SegmentStyle}" Checked="Tab_Changed" Click="Tab_Clicked"/>
                                 <RadioButton x:Name="TabPomodoro" Content="Pomodoro" GroupName="Tabs"
-                                             Style="{StaticResource SegmentStyle}" Checked="Tab_Changed"/>
+                                             Style="{StaticResource SegmentStyle}" Checked="Tab_Changed" Click="Tab_Clicked"/>
                             </StackPanel>
                         </Grid>
                     </Border>
@@ -573,7 +573,8 @@
                 <!-- ========== SETTINGS PANEL ========== -->
                 <Border x:Name="SettingsPanel" Grid.Row="2" Opacity="0" Visibility="Collapsed" RenderTransformOrigin="0.5,0.5">
                     <Border.RenderTransform><ScaleTransform ScaleX="1" ScaleY="1"/></Border.RenderTransform>
-                    <ScrollViewer VerticalScrollBarVisibility="Hidden">
+                    <ScrollViewer x:Name="SettingsScroller" VerticalScrollBarVisibility="Hidden"
+                                  PreviewMouseWheel="SmoothScroll_MouseWheel">
                         <StackPanel Margin="24,8,24,24">
 
                             <TextBlock Text="Settings" FontFamily="Segoe UI" FontSize="20" FontWeight="SemiBold"

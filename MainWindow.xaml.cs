@@ -1,4 +1,5 @@
 using System;
+using System.Threading.Tasks;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Input;
@@ -37,6 +38,8 @@ public partial class MainWindow : Window
     private string _previousTab = "caffeine";
     private bool _isAnimating;
     private bool _lastToggleState;
+    private double _scrollTarget;
+    private bool _scrollAnimating;
 
     public MainWindow()
     {
@@ -240,6 +243,20 @@ public partial class MainWindow : Window
         if (SettingsPanel.Visibility == Visibility.Visible)
             _currentPanel = "settings";
 
+        AnimateToPanel(target);
+    }
+
+    private void Tab_Clicked(object sender, RoutedEventArgs e)
+    {
+        if (SettingsPanel == null || SettingsPanel.Visibility != Visibility.Visible) return;
+        if (_isAnimating) return;
+
+        var rb = (RadioButton)sender;
+        if (rb.IsChecked != true) return;
+
+        var target = sender == TabPomodoro ? "pomodoro" : "caffeine";
+        PositionSegIndicator(rb, true);
+        _currentPanel = "settings";
         AnimateToPanel(target);
     }
 
@@ -649,6 +666,7 @@ public partial class MainWindow : Window
             CaffeineApp.SetActive(false);
 
         PomShowBalloon();
+        PlayCompletionBeeps();
         PomAdvancePhase();
         _pomState = PomTimerState.Idle;
         PomStartPauseButton.Content = "Start";
@@ -689,6 +707,20 @@ public partial class MainWindow : Window
             _ => ""
         };
         CaffeineApp.ShowBalloon("Pomodoro", msg);
+    }
+
+    private static void PlayCompletionBeeps()
+    {
+        Task.Run(() =>
+        {
+            Console.Beep(800, 200);
+            Console.Beep(1000, 200);
+            Console.Beep(1200, 300);
+            System.Threading.Thread.Sleep(400);
+            Console.Beep(800, 200);
+            Console.Beep(1000, 200);
+            Console.Beep(1200, 300);
+        });
     }
 
     private void PomUpdateDisplay()
@@ -901,5 +933,36 @@ public partial class MainWindow : Window
                 Hide();
             }
         }
+    }
+
+    private void SmoothScroll_MouseWheel(object sender, MouseWheelEventArgs e)
+    {
+        e.Handled = true;
+        var sv = (ScrollViewer)sender;
+        if (!_scrollAnimating)
+            _scrollTarget = sv.VerticalOffset;
+        _scrollTarget -= e.Delta * 0.4;
+        _scrollTarget = Math.Clamp(_scrollTarget, 0, sv.ScrollableHeight);
+        if (!_scrollAnimating) AnimateScroll(sv);
+    }
+
+    private void AnimateScroll(ScrollViewer sv)
+    {
+        _scrollAnimating = true;
+        var timer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(16) };
+        timer.Tick += (_, _) =>
+        {
+            var current = sv.VerticalOffset;
+            var diff = _scrollTarget - current;
+            if (Math.Abs(diff) < 0.5)
+            {
+                sv.ScrollToVerticalOffset(_scrollTarget);
+                timer.Stop();
+                _scrollAnimating = false;
+                return;
+            }
+            sv.ScrollToVerticalOffset(current + diff * 0.2);
+        };
+        timer.Start();
     }
 }
