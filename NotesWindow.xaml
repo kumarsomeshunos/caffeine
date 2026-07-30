@@ -1,0 +1,142 @@
+<Window x:Class="CaffeineWin.NotesWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="Notes"
+        Width="932" Height="652"
+        MinWidth="672" MinHeight="452"
+        WindowStyle="None"
+        ResizeMode="CanResize"
+        AllowsTransparency="True"
+        Background="Transparent"
+        WindowStartupLocation="CenterScreen"
+        KeyDown="Window_KeyDown">
+
+    <!-- A shell around the shared NotesView. Transparency gives the same 12px rounded shell and
+         soft shadow as the tray window; WindowChrome still supplies dragging, snapping and edge
+         resizing. The shadow lives in the margin, which is zeroed when maximised. -->
+    <WindowChrome.WindowChrome>
+        <WindowChrome CaptionHeight="50" ResizeBorderThickness="8"
+                      GlassFrameThickness="0" CornerRadius="0" UseAeroCaptionButtons="False"/>
+    </WindowChrome.WindowChrome>
+
+    <Window.Resources>
+        <CubicEase x:Key="BubbleEase" EasingMode="EaseOut"/>
+
+        <!-- Title bar buttons: the same 28px circles the tray window uses for its gear and close,
+             down to the surface colours and the 1.1 hover scale. No red Windows close button —
+             this window belongs to Caffeine, not to the shell. -->
+        <Style x:Key="TitleBarButtonStyle" TargetType="Button">
+            <Setter Property="Cursor" Value="Hand"/>
+            <Setter Property="Margin" Value="8,0,0,0"/>
+            <Setter Property="RenderTransformOrigin" Value="0.5,0.5"/>
+            <Setter Property="RenderTransform">
+                <Setter.Value><ScaleTransform ScaleX="1" ScaleY="1"/></Setter.Value>
+            </Setter>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="Button">
+                        <Border x:Name="CircleBorder" Width="28" Height="28"
+                                CornerRadius="14" Background="{DynamicResource SurfaceColor}">
+                            <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter TargetName="CircleBorder" Property="Background" Value="{DynamicResource SurfaceHover}"/>
+                                <Trigger.EnterActions>
+                                    <BeginStoryboard>
+                                        <Storyboard>
+                                            <DoubleAnimation Storyboard.TargetProperty="RenderTransform.ScaleX"
+                                                             To="1.1" Duration="0:0:0.15"
+                                                             EasingFunction="{StaticResource BubbleEase}"/>
+                                            <DoubleAnimation Storyboard.TargetProperty="RenderTransform.ScaleY"
+                                                             To="1.1" Duration="0:0:0.15"
+                                                             EasingFunction="{StaticResource BubbleEase}"/>
+                                        </Storyboard>
+                                    </BeginStoryboard>
+                                </Trigger.EnterActions>
+                                <Trigger.ExitActions>
+                                    <BeginStoryboard>
+                                        <Storyboard>
+                                            <DoubleAnimation Storyboard.TargetProperty="RenderTransform.ScaleX"
+                                                             To="1" Duration="0:0:0.2"
+                                                             EasingFunction="{StaticResource BubbleEase}"/>
+                                            <DoubleAnimation Storyboard.TargetProperty="RenderTransform.ScaleY"
+                                                             To="1" Duration="0:0:0.2"
+                                                             EasingFunction="{StaticResource BubbleEase}"/>
+                                        </Storyboard>
+                                    </BeginStoryboard>
+                                </Trigger.ExitActions>
+                            </Trigger>
+                            <Trigger Property="IsPressed" Value="True">
+                                <Trigger.EnterActions>
+                                    <BeginStoryboard>
+                                        <Storyboard>
+                                            <DoubleAnimation Storyboard.TargetProperty="RenderTransform.ScaleX"
+                                                             To="0.92" Duration="0:0:0.08"/>
+                                            <DoubleAnimation Storyboard.TargetProperty="RenderTransform.ScaleY"
+                                                             To="0.92" Duration="0:0:0.08"/>
+                                        </Storyboard>
+                                    </BeginStoryboard>
+                                </Trigger.EnterActions>
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+    </Window.Resources>
+
+    <Border x:Name="Shell" CornerRadius="12" Margin="16"
+            Background="{DynamicResource NotesAmbient}"
+            RenderTransformOrigin="0.5,0.5">
+        <Border.RenderTransform>
+            <ScaleTransform x:Name="ShellScale" ScaleX="1" ScaleY="1"/>
+        </Border.RenderTransform>
+        <Border.Effect>
+            <DropShadowEffect ShadowDepth="2" BlurRadius="24" Opacity="0.15" Color="#000000"/>
+        </Border.Effect>
+
+        <Border x:Name="ShellInner" CornerRadius="12" Background="{DynamicResource NotesAmbient}">
+            <Grid>
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="50"/>
+                    <RowDefinition Height="*"/>
+                </Grid.RowDefinitions>
+
+                <!-- Title bar. Same padding, type scale and circular buttons as the tray window. -->
+                <Grid Grid.Row="0" Background="Transparent" Margin="20,14,20,8">
+                    <TextBlock Text="Notes" FontFamily="Segoe UI" FontSize="16" FontWeight="SemiBold"
+                               Foreground="{DynamicResource PrimaryText}" VerticalAlignment="Center"/>
+
+                    <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" VerticalAlignment="Center"
+                                WindowChrome.IsHitTestVisibleInChrome="True">
+                        <Button x:Name="DockButton" Click="Dock_Click" Style="{StaticResource TitleBarButtonStyle}"
+                                Margin="0" ToolTip="Put Notes back in the Caffeine window">
+                            <Path Data="M3,10 H10 V1 H1 V7 M5.5,5.5 L0.5,10.5 M0.5,10.5 H4 M0.5,10.5 V7"
+                                  Stroke="{DynamicResource SecondaryText}" StrokeThickness="1.3"
+                                  StrokeStartLineCap="Round" StrokeEndLineCap="Round"
+                                  Width="11" Height="11"/>
+                        </Button>
+                        <Button Click="Minimize_Click" Style="{StaticResource TitleBarButtonStyle}" ToolTip="Minimise">
+                            <TextBlock Text="─" FontSize="11" Foreground="{DynamicResource SecondaryText}"
+                                       HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                        </Button>
+                        <Button x:Name="MaxRestoreButton" Click="MaxRestore_Click"
+                                Style="{StaticResource TitleBarButtonStyle}" ToolTip="Maximise">
+                            <TextBlock x:Name="MaxRestoreGlyph" Text="□" FontSize="13"
+                                       Foreground="{DynamicResource SecondaryText}"
+                                       HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                        </Button>
+                        <Button Click="Close_Click" Style="{StaticResource TitleBarButtonStyle}" ToolTip="Close">
+                            <TextBlock Text="✕" FontSize="12" Foreground="{DynamicResource SecondaryText}"
+                                       HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                        </Button>
+                    </StackPanel>
+                </Grid>
+
+                <!-- The shared NotesView is parented here at runtime. -->
+                <Grid x:Name="NotesHost" Grid.Row="1"/>
+            </Grid>
+        </Border>
+    </Border>
+</Window>

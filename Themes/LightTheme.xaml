@@ -18,8 +18,20 @@
     <SolidColorBrush x:Key="PowerIconFill" Color="#F2F2F7"/>
     <SolidColorBrush x:Key="PowerIconStrokeOutline" Color="#E5E5EA"/>
 
+    <!-- Notes (Apple Notes amber) -->
+    <SolidColorBrush x:Key="NotesAccent" Color="#E8A317"/>
+    <SolidColorBrush x:Key="NotesSelectionFill" Color="#F5C24B"/>
+    <SolidColorBrush x:Key="NotesSelectionText" Color="#1C1C1E"/>
+    <SolidColorBrush x:Key="NotesSelectionSubtext" Color="#6B5518"/>
+    <SolidColorBrush x:Key="NotesListBackground" Color="#F7F7FA"/>
+    <SolidColorBrush x:Key="NotesEditorBackground" Color="White"/>
+    <SolidColorBrush x:Key="NotesScrim" Color="#59000000"/>
+    <!-- The Notes ambience: a warm latte the panes float on, sibling to PomodoroRed. -->
+    <SolidColorBrush x:Key="NotesAmbient" Color="#AD8A5F"/>
+
     <Color x:Key="WindowBackgroundColor">White</Color>
     <Color x:Key="PomodoroRedColor">#AF4949</Color>
+    <Color x:Key="NotesAmbientColor">#AD8A5F</Color>
     <Color x:Key="PrimaryTextColor">#1C1C1E</Color>
     <Color x:Key="AccentBlueColor">#007AFF</Color>
     <Color x:Key="PowerIconFillColor">#F2F2F7</Color>

@@ -51,9 +51,11 @@ Open an issue describing:
 
 ```
 caffeine-win/
-  App.xaml(.cs)           — Application entry, tray icon, keep-awake logic
+  App.xaml(.cs)           — Application entry, tray icon, keep-awake logic, the shared feature views
   MainWindow.xaml(.cs)    — Main UI window with tabs and settings
+  NotesWindow.xaml(.cs)   — Optional standalone window for Notes
   ThemeManager.cs         — Light/dark theme detection and switching
-  Controls/               — Reusable UI controls (ScrollingTextBlock)
+  Notes/                  — Note model and the notes.json store
+  Controls/               — NotesView, ScrollingTextBlock, SmoothScroller
   Themes/                 — Light and dark ResourceDictionary files
 ```
