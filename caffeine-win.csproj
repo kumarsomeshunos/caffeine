@@ -12,10 +12,14 @@
     <IncludeNativeLibrariesForSelfExtract>true</IncludeNativeLibrariesForSelfExtract>
     <EnableCompressionInSingleFile>true</EnableCompressionInSingleFile>
 
-    <Version>1.1.0</Version>
+    <Version>2.0.0</Version>
+    <Product>Caffeine</Product>
     <Authors>Somesh Kumar</Authors>
-    <Description>A lightweight Windows system tray application that keeps your screen awake.</Description>
+    <Copyright>Copyright (c) 2026 Somesh Kumar</Copyright>
+    <Description>A Windows tray app that keeps your screen awake, and keeps your focus, notes and tasks with it.</Description>
     <PackageLicenseExpression>MIT</PackageLicenseExpression>
+    <PackageProjectUrl>https://github.com/kumarsomeshunos/caffeine</PackageProjectUrl>
+    <RepositoryUrl>https://github.com/kumarsomeshunos/caffeine</RepositoryUrl>
     <RepositoryType>git</RepositoryType>
   </PropertyGroup>
 </Project>

@@ -1,138 +1,159 @@
 # Caffeine
 
-A lightweight Windows system tray application that keeps your screen awake.
+**A Windows tray app that keeps your screen awake — and keeps your focus, notes and tasks with it.**
 
-> No more wiggling your mouse during long presentations, downloads, or remote sessions.
+[![Build](https://github.com/kumarsomeshunos/caffeine/actions/workflows/build.yml/badge.svg)](https://github.com/kumarsomeshunos/caffeine/actions/workflows/build.yml)
+[![Release](https://img.shields.io/github/v/release/kumarsomeshunos/caffeine?sort=semver)](https://github.com/kumarsomeshunos/caffeine/releases)
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+[![.NET 8](https://img.shields.io/badge/.NET-8.0-512BD4.svg)](https://dotnet.microsoft.com/download/dotnet/8.0)
+[![Downloads](https://img.shields.io/github/downloads/kumarsomeshunos/caffeine/total)](https://github.com/kumarsomeshunos/caffeine/releases)
 
-<!-- TODO: Add screenshots here -->
+Caffeine started as one button that stops Windows going to sleep. It still is — but the same window
+now also holds a Pomodoro timer, a rich-text notepad and a task list, because those are the things
+you reach for during the long job you were staying awake for anyway.
+
+One self-contained executable. No installer, no account, no NuGet packages, and **no network access
+of any kind** — nothing you write ever leaves your machine.
+
+<!-- Screenshots: drop images in docs/ and link them here. -->
 
 ## Features
 
-- **Keep Awake** — Prevents Windows from sleeping or turning off the display using the native `SetThreadExecutionState` API
-- **Stay Green Mode** — Alternative method that jiggles the mouse by 1 pixel (keeps collaboration apps showing you as "Available")
-- **Auto-Off Timers** — Set caffeine to automatically deactivate after 15m, 30m, 1h, or 2h
-- **Pomodoro Timer** — Built-in Pomodoro technique timer with configurable work/break durations and cycles
-- **Notes** — An Apple Notes-inspired notes app in its own resizable window: list and editor panes, pinned notes, search, and autosave
-- **Todo** — A task list with everything Google Tasks does: multiple lists, due dates and times, subtasks, repeats, and reminders
-- **A colour per feature** — the window shifts with what you're doing: neutral for Caffeine, red for Pomodoro, warm coffee for Notes, green for Todo
-- **Dark & Light Themes** — Follows your Windows system theme or set manually
-- **A cup that steams when it is working** — the tray icon, the taskbar icon and the big button all share one mark, and vapour rises from it while caffeine is on
-- **System Tray** — Lives in your tray with left-click toggle and right-click menu
-- **Minimal & Fast** — Single-file executable, no installer needed, starts in under a second
+**Keep awake**
+- Stops Windows sleeping or blanking the display through the native `SetThreadExecutionState` API
+- **Stay Green** as an alternative: nudges the cursor a single pixel each second, so Teams and Slack
+  keep showing you as available
+- **Auto-off** after 15m, 30m, 1h or 2h, counted from an absolute deadline so changing it mid-session
+  behaves
+- The tray icon *is* the state: a grey cup when idle, a blue cup with rising steam when it is working
 
-## Installation
+**Pomodoro**
+- Configurable work (15/25/45m or custom), short break (5/10m), long break (15/20/30m) and cycle count
+- Optionally holds the screen awake through work sessions — and releases only the session it started
+- A tray balloon and a short beep at each phase change
+
+**Notes**
+- Rich text: bold, italic, underline, strikethrough, a heading style, bulleted and numbered lists
+- Pictures pasted, dragged or attached, stored inside the note, with a full-size viewer that zooms
+  and pans
+- Pinned notes, live search, autosave, and a **Recently Deleted** bin that keeps a note for 30 days
+
+**Todo**
+- Multiple lists, each with its own colour
+- Due dates and times, one level of subtasks, and daily/weekly/monthly/yearly repeats
+- Tray reminders when a task falls due, whether or not the window is open
+- Drag to reorder, sort by date or title, undo a delete, and clear completed in one go
+
+**Throughout**
+- A colour per feature — the whole window shifts: neutral for Caffeine, red for Pomodoro, warm coffee
+  for Notes, green for Todo
+- Dark and light themes, following the Windows system theme or set by hand
+- Custom chrome, one shared motion language, and text that rolls character by character rather than
+  swapping wholesale
+
+## Install
 
 ### Download
 
-Grab the latest `.exe` from [Releases](../../releases) — it's a single self-contained file with no dependencies.
+Grab `caffeine-win.exe` from the [latest release](https://github.com/kumarsomeshunos/caffeine/releases/latest).
+It is a single self-contained file — put it anywhere and run it.
 
-### Build from Source
+Windows SmartScreen will warn you the first time, because the binary is not code-signed. *More info →
+Run anyway*, or [build it yourself](#build-from-source) if you would rather not take that on trust.
 
-**Prerequisites:**
-- [.NET 8 SDK](https://dotnet.microsoft.com/download/dotnet/8.0)
-- Windows 10/11
+**Requirements:** Windows 10 or 11, 64-bit. No .NET installation needed — the runtime is inside the exe.
+
+### Build from source
 
 ```bash
-git clone https://github.com/YourUsername/caffeine-win.git
-cd caffeine-win
-dotnet build
+git clone https://github.com/kumarsomeshunos/caffeine.git
+cd caffeine
+dotnet build          # debug build
+dotnet run            # the csproj is at the repository root
 ```
 
-To create a release build:
+Release build:
 
 ```bash
 dotnet publish -c Release -r win-x64 --self-contained
+# → bin/Release/net8.0-windows/win-x64/publish/caffeine-win.exe
 ```
 
-The output is a single `.exe` in `bin/Release/net8.0-windows/win-x64/publish/`.
+Requires the [.NET 8 SDK](https://dotnet.microsoft.com/download/dotnet/8.0). A newer SDK builds it
+fine; the target framework stays `net8.0-windows`.
 
 ## Usage
 
 1. Run `caffeine-win.exe` — it appears in your system tray
-2. **Left-click** the tray icon to toggle keep-awake on/off
-3. **Double-click** to open the main window
-4. **Right-click** for the context menu (Open, Pomodoro, Notes, Todo, Exit)
+2. **Left-click** the tray icon to toggle keep-awake
+3. **Double-click** to open the window
+4. **Right-click** for the menu: Open, Pomodoro, Notes, Todo, Exit
 
-### Keyboard Shortcuts
+Closing the window does not exit the app — it keeps running in the tray. Use **Exit** from the tray
+menu to quit properly.
 
-**Main window**
+The four tabs across the top switch what the window is. Notes and Todo widen it in place; the
+**pop-out button** in the title bar moves either into its own resizable window, and the dock button
+puts it back.
 
-| Key | Action |
-|-----|--------|
-| Escape | Close window (app stays in tray) |
+### Keyboard shortcuts
 
-**Notes window**
+| Where | Key | Action |
+|-------|-----|--------|
+| Anywhere | `Escape` | Close the window (the app stays in the tray) |
+| Notes | `Ctrl+N` | New note |
+| Notes | `Ctrl+F` | Focus the search box |
+| Notes | `Ctrl+B` / `Ctrl+I` / `Ctrl+U` | Bold, italic, underline |
+| Notes | `Delete` | Delete the selected note (when the list has focus) |
+| Notes | `Escape` | Clear the search, or close the picture viewer |
+| Todo | `Ctrl+N` | Jump to the "Add a task" box |
+| Todo | `Enter` | Add the task, or commit a rename |
+| Todo | `Escape` | Close the date picker, collapse the open task, or clear the add box |
 
-| Key | Action |
-|-----|--------|
-| Ctrl+N | New note |
-| Ctrl+F | Focus the search box |
-| Delete | Delete the selected note (when the list has focus) |
-| Escape | Clear the search, or close the window |
+### Stay Green
 
-**Todo**
+Enable it in Settings or on the Caffeine panel. Instead of asking Windows to stay awake, this moves
+the cursor one pixel back and forth every second, which is enough to keep collaboration tools showing
+you as active. The two methods are mutually exclusive — switching while active hands over cleanly.
 
-| Key | Action |
-|-----|--------|
-| Ctrl+N | Jump to the "Add a task" box |
-| Enter | Add the task, or commit a rename |
-| Escape | Close the date picker, collapse the open task, or clear the add box |
+### Where your data lives
 
-### Stay Green Mode
+| What | Where |
+|------|-------|
+| Notes index, and each note's formatted body | `%AppData%\Caffeine\notes.json` and `bodies\` |
+| Tasks and lists | `%AppData%\Caffeine\tasks.json` |
+| Settings, window geometry, autostart | `HKEY_CURRENT_USER\Software\CaffeineWin` |
 
-Enable in Settings or on the Caffeine homepage. Instead of calling the Windows power API, this mode moves the mouse cursor by 1 pixel back and forth every second — keeping collaboration tools (Teams, Slack) showing you as active.
+Both files are plain JSON — back them up, inspect them, edit them. Writes go through a temp file and
+a rename, so a crash mid-save cannot tear the file, and a file that fails to parse is quarantined
+rather than overwritten.
 
-### Pomodoro Timer
+Nothing is written outside your own user profile, nothing asks for elevation, and there is no
+telemetry, analytics, crash reporting or update check. See [SECURITY.md](SECURITY.md).
 
-Configurable work duration (15/25/45m or custom), short break (5/10m), long break (15/20/30m), and number of cycles before a long break. Optionally keeps the screen awake during work sessions.
+## How it is built
 
-### Notes
+- **.NET 8**, WPF for the UI, Windows Forms for the tray `NotifyIcon`
+- **Zero NuGet packages** — deliberately. `System.Text.Json`, GDI+ and two P/Invokes
+  (`SetThreadExecutionState`, `SendInput`) are all it uses
+- No MVVM framework and no DI container; the codebase is small enough that neither pays for itself
+- Every visual is code — there is not a single `.ico`, `.png` or audio file in the repository
 
-Click **Notes** in the title-bar tab strip (or pick Notes from the tray menu). The window expands and transforms into the notes app — the list on the left, the editor on the right — the same way switching to Pomodoro works. Switching back to Caffeine or Pomodoro shrinks it again.
-
-Prefer it as its own window? Click the **pop-out button** in the title bar and Notes moves into a separate, resizable window, keeping whatever note you were reading. The **dock button** there puts it back.
-
-- Each note has its own **title** field above the body; the body's first lines show as a preview in the list
-- **Formatting**: click **Aa** to fold out the formatting bar — bold, italic, underline and strikethrough, a heading style, and bulleted or numbered lists (Tab nests a list item; Ctrl+B/I/U work as usual)
-- **Pictures**: paste a screenshot, drag an image file in, or use the picture button — it's stored inside the note
-- **Click a picture** to open it large: fit, zoom with the buttons, the scroll wheel or `+`/`−`, drag to pan, double-click to flip between fitted and actual size, Escape to close
-- Notes sort by most recently edited; **pinned** notes group above the rest
-- **Search** filters as you type; **right-click** a note to pin, duplicate or delete it
-- Everything **autosaves** — there is no save button. Blank notes are discarded automatically
-- Deleting a note moves it to **Recently Deleted** for 30 days — open it from the footer of the list to restore a note or remove it for good
-- The window remembers its size, position, divider width, and which note you were reading
-
-Notes are stored as plain JSON at `%AppData%\Caffeine\notes.json`, so they are easy to back up or inspect. Nothing is ever sent anywhere.
-
-### Todo
-
-Click **Todo** in the tab strip (or pick it from the tray menu). The window expands into the task list, exactly like Notes — lists on the left, tasks on the right — and the same **pop-out button** moves it into its own resizable window.
-
-- **Add a task** from the row at the top and press Enter. Click a task's **circle** to complete it, or its **name** to open its details in place
-- **Details** hold free-text notes, a due date and optional time, and up to one level of **subtasks**
-- **Repeat** a dated task daily, weekly, monthly or yearly — completing it rolls it forward instead of finishing it
-- **Reminders** arrive as a tray notification when a task falls due, whether or not the window is open. A task with a date but no time is due at 09:00 by default (change it in Settings)
-- **Lists** live in the sidebar: add, rename, recolour, reorder, delete. Right-click a task to **move it to another list**, duplicate it, or add a subtask
-- **Sort** by your own order (drag to rearrange), by date, or by title
-- **Completed** tasks collect in a section at the bottom that you can collapse, or clear in one go
-- **Deleting is undoable** — a task disappears straight away and an Undo button waits a few seconds. Only deleting a whole list asks you to confirm
-- Settings has a **TODO** section for row density, sort order, the default due time, and whether Completed starts open
-
-Tasks live in `%AppData%\Caffeine\tasks.json`. Like notes, they never leave your machine.
-
-## Tech Stack
-
-- .NET 8 (Windows)
-- WPF (UI framework), `WindowChrome` for the resizable Notes and Todo windows
-- Windows Forms (system tray `NotifyIcon`)
-- P/Invoke (`SetThreadExecutionState`, `SendInput`)
-- `System.Text.Json` for notes storage (in-box)
-- No external NuGet dependencies
+[ARCHITECTURE.md](ARCHITECTURE.md) is the long version: component diagram, state models, the design
+decisions and their rejected alternatives, persistence tables, the manual regression checklist, and
+an honest list of the technical debt.
 
 ## Contributing
 
-See [CONTRIBUTING.md](CONTRIBUTING.md) for development setup and guidelines.
+Issues and pull requests are welcome. [CONTRIBUTING.md](CONTRIBUTING.md) covers the setup, the code
+style, and what to check before opening a PR — the short version is that the build must stay at zero
+warnings, and since there is no test suite, changes are verified by hand against the checklist in
+ARCHITECTURE.md.
+
+## Changelog
+
+See [CHANGELOG.md](CHANGELOG.md).
 
 ## License
 
-[MIT](LICENSE) — use it however you want.
+[MIT](LICENSE) — do what you like with it.
