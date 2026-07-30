@@ -174,6 +174,7 @@ public partial class ScrollingTextBlock : UserControl
         {
             _display.Text = c.ToString();
             _displayTranslate.Y = 0;
+            _incoming.Text = "";
             _incoming.Opacity = 0;
             SetMinWidth(c, _display.FontSize, _display.FontFamily);
         }
@@ -216,6 +217,9 @@ public partial class ScrollingTextBlock : UserControl
                 _incomingTranslate.BeginAnimation(TranslateTransform.YProperty, null);
                 _display.Text = c.ToString();
                 _displayTranslate.Y = 0;
+                // Clear the incoming slot, not just its opacity: an invisible TextBlock still
+                // holding the character makes assistive tech read every letter twice.
+                _incoming.Text = "";
                 _incoming.Opacity = 0;
                 _incomingTranslate.Y = 0;
                 _isAnimating = false;
