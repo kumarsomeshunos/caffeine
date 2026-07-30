@@ -13,7 +13,8 @@ A lightweight Windows system tray application that keeps your screen awake.
 - **Auto-Off Timers** — Set caffeine to automatically deactivate after 15m, 30m, 1h, or 2h
 - **Pomodoro Timer** — Built-in Pomodoro technique timer with configurable work/break durations and cycles
 - **Notes** — An Apple Notes-inspired notes app in its own resizable window: list and editor panes, pinned notes, search, and autosave
-- **A colour per feature** — the window shifts with what you're doing: neutral for Caffeine, red for Pomodoro, warm coffee for Notes
+- **Todo** — A task list with everything Google Tasks does: multiple lists, due dates and times, subtasks, repeats, and reminders
+- **A colour per feature** — the window shifts with what you're doing: neutral for Caffeine, red for Pomodoro, warm coffee for Notes, green for Todo
 - **Dark & Light Themes** — Follows your Windows system theme or set manually
 - **System Tray** — Lives in your tray with left-click toggle and right-click menu
 - **Minimal & Fast** — Single-file executable, no installer needed, starts in under a second
@@ -49,7 +50,7 @@ The output is a single `.exe` in `bin/Release/net8.0-windows/win-x64/publish/`.
 1. Run `caffeine-win.exe` — it appears in your system tray
 2. **Left-click** the tray icon to toggle keep-awake on/off
 3. **Double-click** to open the main window
-4. **Right-click** for the context menu (Open, Pomodoro, Notes, Exit)
+4. **Right-click** for the context menu (Open, Pomodoro, Notes, Todo, Exit)
 
 ### Keyboard Shortcuts
 
@@ -67,6 +68,14 @@ The output is a single `.exe` in `bin/Release/net8.0-windows/win-x64/publish/`.
 | Ctrl+F | Focus the search box |
 | Delete | Delete the selected note (when the list has focus) |
 | Escape | Clear the search, or close the window |
+
+**Todo**
+
+| Key | Action |
+|-----|--------|
+| Ctrl+N | Jump to the "Add a task" box |
+| Enter | Add the task, or commit a rename |
+| Escape | Close the date picker, collapse the open task, or clear the add box |
 
 ### Stay Green Mode
 
@@ -94,10 +103,26 @@ Prefer it as its own window? Click the **pop-out button** in the title bar and N
 
 Notes are stored as plain JSON at `%AppData%\Caffeine\notes.json`, so they are easy to back up or inspect. Nothing is ever sent anywhere.
 
+### Todo
+
+Click **Todo** in the tab strip (or pick it from the tray menu). The window expands into the task list, exactly like Notes — lists on the left, tasks on the right — and the same **pop-out button** moves it into its own resizable window.
+
+- **Add a task** from the row at the top and press Enter. Click a task's **circle** to complete it, or its **name** to open its details in place
+- **Details** hold free-text notes, a due date and optional time, and up to one level of **subtasks**
+- **Repeat** a dated task daily, weekly, monthly or yearly — completing it rolls it forward instead of finishing it
+- **Reminders** arrive as a tray notification when a task falls due, whether or not the window is open. A task with a date but no time is due at 09:00 by default (change it in Settings)
+- **Lists** live in the sidebar: add, rename, recolour, reorder, delete. Right-click a task to **move it to another list**, duplicate it, or add a subtask
+- **Sort** by your own order (drag to rearrange), by date, or by title
+- **Completed** tasks collect in a section at the bottom that you can collapse, or clear in one go
+- **Deleting is undoable** — a task disappears straight away and an Undo button waits a few seconds. Only deleting a whole list asks you to confirm
+- Settings has a **TODO** section for row density, sort order, the default due time, and whether Completed starts open
+
+Tasks live in `%AppData%\Caffeine\tasks.json`. Like notes, they never leave your machine.
+
 ## Tech Stack
 
 - .NET 8 (Windows)
-- WPF (UI framework), `WindowChrome` for the resizable notes window
+- WPF (UI framework), `WindowChrome` for the resizable Notes and Todo windows
 - Windows Forms (system tray `NotifyIcon`)
 - P/Invoke (`SetThreadExecutionState`, `SendInput`)
 - `System.Text.Json` for notes storage (in-box)

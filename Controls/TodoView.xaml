@@ -1,0 +1,713 @@
+<UserControl x:Class="CaffeineWin.Controls.TodoView"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:local="clr-namespace:CaffeineWin.Controls"
+             xmlns:prim="clr-namespace:System.Windows.Controls.Primitives;assembly=PresentationFramework">
+
+    <!-- The whole todo experience. Like NotesView, exactly one instance exists (App owns it) and it
+         is reparented between the tray window's Todo panel and TodoWindow. -->
+    <UserControl.Resources>
+        <CubicEase x:Key="BubbleEase" EasingMode="EaseOut"/>
+        <QuadraticEase x:Key="SoftEase" EasingMode="EaseInOut"/>
+
+        <!-- Circular icon button, as used across the app -->
+        <Style x:Key="TodoIconButtonStyle" TargetType="Button">
+            <Setter Property="Cursor" Value="Hand"/>
+            <Setter Property="Width" Value="28"/>
+            <Setter Property="Height" Value="28"/>
+            <Setter Property="Margin" Value="0,0,6,0"/>
+            <Setter Property="RenderTransformOrigin" Value="0.5,0.5"/>
+            <Setter Property="RenderTransform">
+                <Setter.Value><ScaleTransform ScaleX="1" ScaleY="1"/></Setter.Value>
+            </Setter>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="Button">
+                        <Border x:Name="Bg" Background="{DynamicResource SurfaceColor}" CornerRadius="14">
+                            <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter TargetName="Bg" Property="Background" Value="{DynamicResource SurfaceHover}"/>
+                                <Trigger.EnterActions>
+                                    <BeginStoryboard>
+                                        <Storyboard>
+                                            <DoubleAnimation Storyboard.TargetProperty="RenderTransform.ScaleX"
+                                                             To="1.12" Duration="0:0:0.15" EasingFunction="{StaticResource BubbleEase}"/>
+                                            <DoubleAnimation Storyboard.TargetProperty="RenderTransform.ScaleY"
+                                                             To="1.12" Duration="0:0:0.15" EasingFunction="{StaticResource BubbleEase}"/>
+                                        </Storyboard>
+                                    </BeginStoryboard>
+                                </Trigger.EnterActions>
+                                <Trigger.ExitActions>
+                                    <BeginStoryboard>
+                                        <Storyboard>
+                                            <DoubleAnimation Storyboard.TargetProperty="RenderTransform.ScaleX"
+                                                             To="1" Duration="0:0:0.2" EasingFunction="{StaticResource BubbleEase}"/>
+                                            <DoubleAnimation Storyboard.TargetProperty="RenderTransform.ScaleY"
+                                                             To="1" Duration="0:0:0.2" EasingFunction="{StaticResource BubbleEase}"/>
+                                        </Storyboard>
+                                    </BeginStoryboard>
+                                </Trigger.ExitActions>
+                            </Trigger>
+                            <Trigger Property="IsPressed" Value="True">
+                                <Trigger.EnterActions>
+                                    <BeginStoryboard>
+                                        <Storyboard>
+                                            <DoubleAnimation Storyboard.TargetProperty="RenderTransform.ScaleX" To="0.9" Duration="0:0:0.08"/>
+                                            <DoubleAnimation Storyboard.TargetProperty="RenderTransform.ScaleY" To="0.9" Duration="0:0:0.08"/>
+                                        </Storyboard>
+                                    </BeginStoryboard>
+                                </Trigger.EnterActions>
+                            </Trigger>
+                            <Trigger Property="IsEnabled" Value="False">
+                                <Setter Property="Opacity" Value="0.35"/>
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
+        <!-- Quiet text button, for things like Clear all -->
+        <Style x:Key="TodoQuietButtonStyle" TargetType="Button">
+            <Setter Property="Cursor" Value="Hand"/>
+            <Setter Property="Foreground" Value="{DynamicResource SecondaryText}"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="Button">
+                        <Border x:Name="Bg" Background="Transparent" CornerRadius="8" Padding="9,4">
+                            <TextBlock Text="{TemplateBinding Content}" FontFamily="Segoe UI" FontSize="11"
+                                       Foreground="{TemplateBinding Foreground}"/>
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter TargetName="Bg" Property="Background" Value="{DynamicResource SurfaceHover}"/>
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
+        <!-- ===== Menus =====
+             The stock context menu is a light Windows menu, so it is retemplated to the app's
+             surfaces. These are implicit: a menu's resource lookup runs through its placement
+             target, so every menu raised from this view picks them up. -->
+        <!-- A separator inside a menu resolves this key, not the implicit Separator style. -->
+        <Style x:Key="{x:Static MenuItem.SeparatorStyleKey}" TargetType="Separator">
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="Separator">
+                        <Border Height="1" Background="{DynamicResource DividerColor}" Margin="10,4"/>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
+        <Style TargetType="MenuItem">
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="MenuItem">
+                        <Border x:Name="Bg" Background="Transparent" CornerRadius="7" Margin="4,1">
+                            <Grid>
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="24"/>
+                                    <ColumnDefinition Width="*"/>
+                                    <ColumnDefinition Width="Auto"/>
+                                </Grid.ColumnDefinitions>
+
+                                <Path x:Name="Check" Grid.Column="0" Data="M1,4.5 L3.9,7.4 L9.5,1.6"
+                                      Stroke="{DynamicResource TodoAccent}" StrokeThickness="1.6"
+                                      StrokeStartLineCap="Round" StrokeEndLineCap="Round" StrokeLineJoin="Round"
+                                      Width="11" Height="9" Visibility="Collapsed"
+                                      HorizontalAlignment="Center" VerticalAlignment="Center"/>
+
+                                <ContentPresenter Grid.Column="1" ContentSource="Header" RecognizesAccessKey="True"
+                                                  VerticalAlignment="Center" Margin="0,6,14,7"
+                                                  TextElement.FontFamily="Segoe UI" TextElement.FontSize="12"
+                                                  TextElement.Foreground="{DynamicResource PrimaryText}"/>
+
+                                <Path x:Name="Arrow" Grid.Column="2" Data="M1,1 L4.5,4.5 L1,8"
+                                      Stroke="{DynamicResource SecondaryText}" StrokeThickness="1.2"
+                                      StrokeStartLineCap="Round" StrokeEndLineCap="Round"
+                                      Margin="0,0,10,0" Visibility="Collapsed" VerticalAlignment="Center"/>
+
+                                <Popup x:Name="PART_Popup" AllowsTransparency="True" Focusable="False"
+                                       IsOpen="{Binding IsSubmenuOpen, RelativeSource={RelativeSource TemplatedParent}}"
+                                       Placement="Right" HorizontalOffset="-6" PopupAnimation="Fade">
+                                    <Border Background="{DynamicResource WindowBackground}" CornerRadius="10"
+                                            Padding="3" Margin="10">
+                                        <Border.Effect>
+                                            <DropShadowEffect ShadowDepth="2" BlurRadius="18" Opacity="0.35"/>
+                                        </Border.Effect>
+                                        <ItemsPresenter/>
+                                    </Border>
+                                </Popup>
+                            </Grid>
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsHighlighted" Value="True">
+                                <Setter TargetName="Bg" Property="Background" Value="{DynamicResource SurfaceHover}"/>
+                            </Trigger>
+                            <Trigger Property="IsChecked" Value="True">
+                                <Setter TargetName="Check" Property="Visibility" Value="Visible"/>
+                            </Trigger>
+                            <Trigger Property="HasItems" Value="True">
+                                <Setter TargetName="Arrow" Property="Visibility" Value="Visible"/>
+                            </Trigger>
+                            <Trigger Property="IsEnabled" Value="False">
+                                <Setter TargetName="Bg" Property="Opacity" Value="0.35"/>
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
+        <Style TargetType="ContextMenu">
+            <Setter Property="HasDropShadow" Value="True"/>
+            <Setter Property="Background" Value="Transparent"/>
+            <Setter Property="MinWidth" Value="150"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="ContextMenu">
+                        <Border Background="{DynamicResource WindowBackground}" CornerRadius="10"
+                                Padding="3" Margin="10">
+                            <Border.Effect>
+                                <DropShadowEffect ShadowDepth="2" BlurRadius="18" Opacity="0.35"/>
+                            </Border.Effect>
+                            <ItemsPresenter/>
+                        </Border>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
+        <!-- Detail chip: due date, repeat. Content is built in code so it can carry a glyph. -->
+        <ControlTemplate x:Key="ChipTemplate" TargetType="Button">
+            <Border x:Name="Bg" Background="{DynamicResource SurfaceHover}" CornerRadius="9" Padding="9,5">
+                <ContentPresenter/>
+            </Border>
+            <ControlTemplate.Triggers>
+                <Trigger Property="IsMouseOver" Value="True">
+                    <Setter TargetName="Bg" Property="Background" Value="{DynamicResource TodoSelectionFill}"/>
+                </Trigger>
+            </ControlTemplate.Triggers>
+        </ControlTemplate>
+
+        <!-- Chip that stays down, for the "Time" switch in the due picker -->
+        <ControlTemplate x:Key="ChipToggleTemplate" TargetType="ToggleButton">
+            <Border x:Name="Bg" Background="{DynamicResource SurfaceHover}" CornerRadius="9" Padding="9,5">
+                <TextBlock x:Name="Label" Text="{TemplateBinding Content}" FontFamily="Segoe UI" FontSize="11.5"
+                           Foreground="{DynamicResource SecondaryText}"/>
+            </Border>
+            <ControlTemplate.Triggers>
+                <Trigger Property="IsMouseOver" Value="True">
+                    <Setter TargetName="Bg" Property="Background" Value="{DynamicResource TodoSelectionFill}"/>
+                </Trigger>
+                <Trigger Property="IsChecked" Value="True">
+                    <Setter TargetName="Bg" Property="Background" Value="{DynamicResource TodoAccent}"/>
+                    <Setter TargetName="Label" Property="Foreground" Value="White"/>
+                </Trigger>
+            </ControlTemplate.Triggers>
+        </ControlTemplate>
+
+        <!-- ===== Calendar =====
+             The stock Calendar is a light-themed Aero control, so the whole thing is retemplated:
+             a flat header, circular day cells, and the app's own type. -->
+        <ControlTemplate x:Key="CalPrevTemplate" TargetType="Button">
+            <Border x:Name="Bg" Background="Transparent" CornerRadius="12" Width="24" Height="24" Cursor="Hand">
+                <Path Data="M5.5,1 L1.5,5 L5.5,9" Stroke="{DynamicResource SecondaryText}" StrokeThickness="1.4"
+                      StrokeStartLineCap="Round" StrokeEndLineCap="Round"
+                      HorizontalAlignment="Center" VerticalAlignment="Center"/>
+            </Border>
+            <ControlTemplate.Triggers>
+                <Trigger Property="IsMouseOver" Value="True">
+                    <Setter TargetName="Bg" Property="Background" Value="{DynamicResource SurfaceHover}"/>
+                </Trigger>
+            </ControlTemplate.Triggers>
+        </ControlTemplate>
+
+        <ControlTemplate x:Key="CalNextTemplate" TargetType="Button">
+            <Border x:Name="Bg" Background="Transparent" CornerRadius="12" Width="24" Height="24" Cursor="Hand">
+                <Path Data="M1.5,1 L5.5,5 L1.5,9" Stroke="{DynamicResource SecondaryText}" StrokeThickness="1.4"
+                      StrokeStartLineCap="Round" StrokeEndLineCap="Round"
+                      HorizontalAlignment="Center" VerticalAlignment="Center"/>
+            </Border>
+            <ControlTemplate.Triggers>
+                <Trigger Property="IsMouseOver" Value="True">
+                    <Setter TargetName="Bg" Property="Background" Value="{DynamicResource SurfaceHover}"/>
+                </Trigger>
+            </ControlTemplate.Triggers>
+        </ControlTemplate>
+
+        <Style x:Key="CalDayStyle" TargetType="CalendarDayButton">
+            <Setter Property="Cursor" Value="Hand"/>
+            <Setter Property="MinWidth" Value="28"/>
+            <Setter Property="MinHeight" Value="28"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="CalendarDayButton">
+                        <Grid>
+                            <Border x:Name="Bg" Background="Transparent" CornerRadius="14" Margin="1"/>
+                            <TextBlock x:Name="Label" Text="{Binding StringFormat={}{0:%d}}"
+                                       FontFamily="Segoe UI" FontSize="11.5"
+                                       Foreground="{DynamicResource PrimaryText}"
+                                       HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                        </Grid>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsInactive" Value="True">
+                                <Setter TargetName="Label" Property="Opacity" Value="0.3"/>
+                            </Trigger>
+                            <Trigger Property="IsToday" Value="True">
+                                <Setter TargetName="Label" Property="Foreground" Value="{DynamicResource TodoAccent}"/>
+                                <Setter TargetName="Label" Property="FontWeight" Value="SemiBold"/>
+                            </Trigger>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter TargetName="Bg" Property="Background" Value="{DynamicResource SurfaceHover}"/>
+                            </Trigger>
+                            <Trigger Property="IsSelected" Value="True">
+                                <Setter TargetName="Bg" Property="Background" Value="{DynamicResource TodoAccent}"/>
+                                <Setter TargetName="Label" Property="Foreground" Value="White"/>
+                                <Setter TargetName="Label" Property="FontWeight" Value="SemiBold"/>
+                            </Trigger>
+                            <Trigger Property="IsBlackedOut" Value="True">
+                                <Setter TargetName="Label" Property="Opacity" Value="0.2"/>
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
+        <!-- Month and year cells, used by the header's drill-up views -->
+        <Style x:Key="CalMonthStyle" TargetType="CalendarButton">
+            <Setter Property="Cursor" Value="Hand"/>
+            <Setter Property="MinWidth" Value="42"/>
+            <Setter Property="MinHeight" Value="30"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="CalendarButton">
+                        <Grid>
+                            <Border x:Name="Bg" Background="Transparent" CornerRadius="9" Margin="2"/>
+                            <ContentPresenter x:Name="Label" HorizontalAlignment="Center" VerticalAlignment="Center"
+                                              TextElement.FontFamily="Segoe UI" TextElement.FontSize="11.5"
+                                              TextElement.Foreground="{DynamicResource PrimaryText}"/>
+                        </Grid>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsInactive" Value="True">
+                                <Setter TargetName="Label" Property="Opacity" Value="0.3"/>
+                            </Trigger>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter TargetName="Bg" Property="Background" Value="{DynamicResource SurfaceHover}"/>
+                            </Trigger>
+                            <Trigger Property="HasSelectedDays" Value="True">
+                                <Setter TargetName="Bg" Property="Background" Value="{DynamicResource TodoAccent}"/>
+                                <Setter TargetName="Label" Property="TextElement.Foreground" Value="White"/>
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
+        <Style TargetType="CalendarItem">
+            <Setter Property="Background" Value="Transparent"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="CalendarItem">
+                        <!-- CalendarItem finds its day-of-week header template by this key. -->
+                        <ControlTemplate.Resources>
+                            <DataTemplate x:Key="{x:Static prim:CalendarItem.DayTitleTemplateResourceKey}">
+                                <TextBlock Text="{Binding}" FontFamily="Segoe UI" FontSize="10" FontWeight="SemiBold"
+                                           Foreground="{DynamicResource SecondaryText}"
+                                           HorizontalAlignment="Center" VerticalAlignment="Center" Margin="0,0,0,4"/>
+                            </DataTemplate>
+                        </ControlTemplate.Resources>
+                        <Grid x:Name="PART_Root">
+                            <Grid.RowDefinitions>
+                                <RowDefinition Height="Auto"/>
+                                <RowDefinition Height="*"/>
+                            </Grid.RowDefinitions>
+
+                            <Grid Grid.Row="0" Margin="0,0,0,4">
+                                <Button x:Name="PART_PreviousButton" Template="{StaticResource CalPrevTemplate}"
+                                        HorizontalAlignment="Left"/>
+                                <Button x:Name="PART_HeaderButton" HorizontalAlignment="Center" VerticalAlignment="Center" Cursor="Hand">
+                                    <Button.Template>
+                                        <ControlTemplate TargetType="Button">
+                                            <Border x:Name="Bg" Background="Transparent" CornerRadius="8" Padding="10,3">
+                                                <ContentPresenter TextElement.FontFamily="Segoe UI" TextElement.FontSize="12"
+                                                                  TextElement.FontWeight="SemiBold"
+                                                                  TextElement.Foreground="{DynamicResource PrimaryText}"/>
+                                            </Border>
+                                            <ControlTemplate.Triggers>
+                                                <Trigger Property="IsMouseOver" Value="True">
+                                                    <Setter TargetName="Bg" Property="Background" Value="{DynamicResource SurfaceHover}"/>
+                                                </Trigger>
+                                            </ControlTemplate.Triggers>
+                                        </ControlTemplate>
+                                    </Button.Template>
+                                </Button>
+                                <Button x:Name="PART_NextButton" Template="{StaticResource CalNextTemplate}"
+                                        HorizontalAlignment="Right"/>
+                            </Grid>
+
+                            <Grid x:Name="PART_MonthView" Grid.Row="1" Visibility="Visible">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="*"/><ColumnDefinition Width="*"/><ColumnDefinition Width="*"/>
+                                    <ColumnDefinition Width="*"/><ColumnDefinition Width="*"/><ColumnDefinition Width="*"/>
+                                    <ColumnDefinition Width="*"/>
+                                </Grid.ColumnDefinitions>
+                                <Grid.RowDefinitions>
+                                    <RowDefinition Height="Auto"/><RowDefinition Height="*"/><RowDefinition Height="*"/>
+                                    <RowDefinition Height="*"/><RowDefinition Height="*"/><RowDefinition Height="*"/>
+                                    <RowDefinition Height="*"/>
+                                </Grid.RowDefinitions>
+                            </Grid>
+
+                            <Grid x:Name="PART_YearView" Grid.Row="1" Visibility="Hidden">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="*"/><ColumnDefinition Width="*"/>
+                                    <ColumnDefinition Width="*"/><ColumnDefinition Width="*"/>
+                                </Grid.ColumnDefinitions>
+                                <Grid.RowDefinitions>
+                                    <RowDefinition Height="*"/><RowDefinition Height="*"/><RowDefinition Height="*"/>
+                                </Grid.RowDefinitions>
+                            </Grid>
+                        </Grid>
+                        <ControlTemplate.Triggers>
+                            <DataTrigger Binding="{Binding DisplayMode, RelativeSource={RelativeSource AncestorType=Calendar}}" Value="Year">
+                                <Setter TargetName="PART_MonthView" Property="Visibility" Value="Hidden"/>
+                                <Setter TargetName="PART_YearView" Property="Visibility" Value="Visible"/>
+                            </DataTrigger>
+                            <DataTrigger Binding="{Binding DisplayMode, RelativeSource={RelativeSource AncestorType=Calendar}}" Value="Decade">
+                                <Setter TargetName="PART_MonthView" Property="Visibility" Value="Hidden"/>
+                                <Setter TargetName="PART_YearView" Property="Visibility" Value="Visible"/>
+                            </DataTrigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
+        <Style TargetType="Calendar">
+            <Setter Property="Background" Value="Transparent"/>
+            <Setter Property="BorderThickness" Value="0"/>
+            <Setter Property="CalendarDayButtonStyle" Value="{StaticResource CalDayStyle}"/>
+            <Setter Property="CalendarButtonStyle" Value="{StaticResource CalMonthStyle}"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="Calendar">
+                        <CalendarItem x:Name="PART_CalendarItem"
+                                      Background="Transparent" BorderThickness="0"
+                                      HorizontalAlignment="Stretch"/>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
+        <!-- Pill primary button, matching ActionButtonStyle in the tray window -->
+        <Style x:Key="TodoAccentButtonStyle" TargetType="Button">
+            <Setter Property="Cursor" Value="Hand"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="Button">
+                        <Border x:Name="Bg" Background="{DynamicResource TodoAccent}" CornerRadius="20" Padding="22,11">
+                            <TextBlock Text="{TemplateBinding Content}" FontFamily="Segoe UI" FontSize="14"
+                                       FontWeight="SemiBold" Foreground="White"/>
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter TargetName="Bg" Property="Opacity" Value="0.88"/>
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
+        <!-- A list in the sidebar: coloured dot, name, and a travelling selection like the notes rows -->
+        <Style x:Key="ListRowStyle" TargetType="ListBoxItem">
+            <Setter Property="Padding" Value="0"/>
+            <Setter Property="HorizontalContentAlignment" Value="Stretch"/>
+            <Setter Property="AutomationProperties.Name" Value="{Binding DisplayName}"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="ListBoxItem">
+                        <Border x:Name="RowBg" Background="Transparent" CornerRadius="10"
+                                Margin="6,1,6,1" Padding="10,8" Cursor="Hand">
+                            <StackPanel Orientation="Horizontal">
+                                <Ellipse Width="9" Height="9" VerticalAlignment="Center"
+                                         Fill="{Binding Colour}"/>
+                                <TextBlock x:Name="RowName" Text="{Binding DisplayName}" Margin="9,0,0,0"
+                                           FontFamily="Segoe UI" FontSize="13"
+                                           Foreground="{DynamicResource PrimaryText}"
+                                           TextTrimming="CharacterEllipsis" VerticalAlignment="Center"/>
+                            </StackPanel>
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <MultiTrigger>
+                                <MultiTrigger.Conditions>
+                                    <Condition Property="IsMouseOver" Value="True"/>
+                                    <Condition Property="IsSelected" Value="False"/>
+                                </MultiTrigger.Conditions>
+                                <Setter TargetName="RowBg" Property="Background" Value="{DynamicResource SurfaceHover}"/>
+                            </MultiTrigger>
+                            <Trigger Property="IsSelected" Value="True">
+                                <Setter TargetName="RowBg" Property="Background" Value="{DynamicResource TodoSelectionFill}"/>
+                                <Setter TargetName="RowName" Property="FontWeight" Value="SemiBold"/>
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
+        <!-- Slim scrollbar, same as the notes view -->
+        <Style TargetType="ScrollBar">
+            <Setter Property="Width" Value="10"/>
+            <Setter Property="Background" Value="Transparent"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="ScrollBar">
+                        <Grid Background="Transparent">
+                            <Track x:Name="PART_Track" IsDirectionReversed="True">
+                                <Track.Thumb>
+                                    <Thumb>
+                                        <Thumb.Template>
+                                            <ControlTemplate TargetType="Thumb">
+                                                <Border x:Name="ThumbBar" Width="5" CornerRadius="2.5"
+                                                        HorizontalAlignment="Center" Opacity="0.4"
+                                                        Background="{DynamicResource SecondaryText}"/>
+                                                <ControlTemplate.Triggers>
+                                                    <Trigger Property="IsMouseOver" Value="True">
+                                                        <Setter TargetName="ThumbBar" Property="Opacity" Value="0.7"/>
+                                                    </Trigger>
+                                                </ControlTemplate.Triggers>
+                                            </ControlTemplate>
+                                        </Thumb.Template>
+                                    </Thumb>
+                                </Track.Thumb>
+                                <Track.IncreaseRepeatButton>
+                                    <RepeatButton Command="ScrollBar.PageDownCommand" Focusable="False" Opacity="0"/>
+                                </Track.IncreaseRepeatButton>
+                                <Track.DecreaseRepeatButton>
+                                    <RepeatButton Command="ScrollBar.PageUpCommand" Focusable="False" Opacity="0"/>
+                                </Track.DecreaseRepeatButton>
+                            </Track>
+                        </Grid>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+    </UserControl.Resources>
+
+    <Grid>
+        <Grid>
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition x:Name="SidebarColumn" Width="210" MinWidth="170" MaxWidth="330"/>
+                <ColumnDefinition Width="6"/>
+                <ColumnDefinition Width="*"/>
+            </Grid.ColumnDefinitions>
+
+            <!-- ===== LISTS SIDEBAR ===== -->
+            <Border x:Name="SidebarPane" Grid.Column="0" Background="{DynamicResource SurfaceColor}"
+                    CornerRadius="14" Margin="14,2,0,14">
+                <Grid>
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="Auto"/>
+                        <RowDefinition Height="*"/>
+                        <RowDefinition Height="Auto"/>
+                    </Grid.RowDefinitions>
+
+                    <TextBlock Grid.Row="0" Text="LISTS" Margin="16,12,0,6"
+                               FontFamily="Segoe UI" FontSize="11" FontWeight="SemiBold"
+                               Foreground="{DynamicResource SecondaryText}"/>
+
+                    <ListBox x:Name="ListsBox" Grid.Row="1"
+                             Background="Transparent" BorderThickness="0"
+                             ScrollViewer.HorizontalScrollBarVisibility="Disabled"
+                             ScrollViewer.CanContentScroll="False"
+                             VirtualizingStackPanel.IsVirtualizing="False"
+                             ItemContainerStyle="{StaticResource ListRowStyle}"
+                             SelectionChanged="Lists_SelectionChanged">
+                        <ListBox.ContextMenu>
+                            <ContextMenu>
+                                <MenuItem Header="Rename" Click="RenameList_Click"/>
+                                <MenuItem x:Name="ListColourMenu" Header="Colour"/>
+                                <Separator/>
+                                <MenuItem Header="Move up" Click="MoveListUp_Click"/>
+                                <MenuItem Header="Move down" Click="MoveListDown_Click"/>
+                                <Separator/>
+                                <MenuItem Header="Delete list" Click="DeleteList_Click"/>
+                            </ContextMenu>
+                        </ListBox.ContextMenu>
+                    </ListBox>
+
+                    <Button x:Name="NewListButton" Grid.Row="2" Click="NewList_Click"
+                            Style="{StaticResource TodoQuietButtonStyle}"
+                            HorizontalAlignment="Left" Margin="12,4,12,10"
+                            Content="+  New list"/>
+                </Grid>
+            </Border>
+
+            <GridSplitter Grid.Column="1" Width="9" HorizontalAlignment="Center" VerticalAlignment="Stretch"
+                          Background="Transparent" Cursor="SizeWE" ResizeBehavior="PreviousAndNext"
+                          ResizeDirection="Columns" Panel.ZIndex="10" DragCompleted="Splitter_DragCompleted"/>
+
+            <!-- ===== TASKS ===== -->
+            <Border x:Name="TasksPane" Grid.Column="2" Background="{DynamicResource NotesEditorBackground}"
+                    CornerRadius="14" Margin="0,2,14,14">
+                <Grid>
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="Auto"/>
+                        <RowDefinition Height="Auto"/>
+                        <RowDefinition Height="*"/>
+                    </Grid.RowDefinitions>
+
+                    <!-- header: list name + sort -->
+                    <Grid Grid.Row="0" Margin="22,14,16,6">
+                        <TextBlock x:Name="ListTitle" Text="" VerticalAlignment="Center"
+                                   FontFamily="Segoe UI" FontSize="19" FontWeight="SemiBold"
+                                   Foreground="{DynamicResource PrimaryText}"
+                                   TextTrimming="CharacterEllipsis"/>
+                        <Button x:Name="SortButton" Click="Sort_Click"
+                                Style="{StaticResource TodoIconButtonStyle}"
+                                HorizontalAlignment="Right" Margin="0" ToolTip="Sort">
+                            <Path Data="M3.5,4 H12.5 M3.5,7.5 H9.5 M3.5,11 H6.5"
+                                  Stroke="{DynamicResource PowerIconStroke}" StrokeThickness="1.4"
+                                  StrokeStartLineCap="Round" StrokeEndLineCap="Round"/>
+                            <Button.ContextMenu>
+                                <ContextMenu x:Name="SortMenu">
+                                    <MenuItem x:Name="SortManual" Header="My order" IsCheckable="True" Click="SortMode_Click" Tag="Manual"/>
+                                    <MenuItem x:Name="SortDate" Header="Date" IsCheckable="True" Click="SortMode_Click" Tag="Date"/>
+                                    <MenuItem x:Name="SortTitle" Header="Title" IsCheckable="True" Click="SortMode_Click" Tag="Title"/>
+                                </ContextMenu>
+                            </Button.ContextMenu>
+                        </Button>
+                    </Grid>
+
+                    <!-- add a task -->
+                    <Border Grid.Row="1" Background="{DynamicResource SurfaceColor}" CornerRadius="14"
+                            Margin="18,2,18,8" Padding="12,8">
+                        <Grid>
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="Auto"/>
+                                <ColumnDefinition Width="*"/>
+                            </Grid.ColumnDefinitions>
+                            <Path Grid.Column="0" Data="M7,1.5 V12.5 M1.5,7 H12.5"
+                                  Stroke="{DynamicResource TodoAccent}" StrokeThickness="1.8"
+                                  StrokeStartLineCap="Round" StrokeEndLineCap="Round"
+                                  Width="14" Height="14" VerticalAlignment="Center" Margin="2,0,10,0"/>
+                            <Grid Grid.Column="1">
+                                <TextBlock x:Name="AddPlaceholder" Text="Add a task"
+                                           FontFamily="Segoe UI" FontSize="13"
+                                           Foreground="{DynamicResource SecondaryText}"
+                                           VerticalAlignment="Center" IsHitTestVisible="False"/>
+                                <TextBox x:Name="AddBox" KeyDown="Add_KeyDown" TextChanged="Add_TextChanged"
+                                         FontFamily="Segoe UI" FontSize="13"
+                                         Foreground="{DynamicResource PrimaryText}"
+                                         CaretBrush="{DynamicResource PrimaryText}"
+                                         SelectionBrush="{DynamicResource TodoAccent}"
+                                         Background="Transparent" BorderThickness="0" Padding="0"
+                                         VerticalContentAlignment="Center"/>
+                            </Grid>
+                        </Grid>
+                    </Border>
+
+                    <ScrollViewer x:Name="TaskScroll" Grid.Row="2" Margin="0,0,0,8"
+                                  VerticalScrollBarVisibility="Auto"
+                                  HorizontalScrollBarVisibility="Disabled"
+                                  PreviewMouseWheel="SmoothScroll_MouseWheel">
+                        <StackPanel x:Name="TaskStack" Margin="10,0,10,10"/>
+                    </ScrollViewer>
+
+                    <TextBlock x:Name="EmptyLabel" Grid.Row="2" Text="Nothing to do"
+                               FontFamily="Segoe UI" FontSize="13"
+                               Foreground="{DynamicResource SecondaryText}"
+                               HorizontalAlignment="Center" VerticalAlignment="Center"
+                               Visibility="Collapsed"/>
+                </Grid>
+            </Border>
+        </Grid>
+
+        <!-- undo toast -->
+        <Border x:Name="UndoToast" Background="{DynamicResource SurfaceColor}" CornerRadius="10"
+                Padding="14,8" Margin="16,0,16,16" Panel.ZIndex="15"
+                HorizontalAlignment="Center" VerticalAlignment="Bottom" Visibility="Collapsed">
+            <Border.RenderTransform><TranslateTransform x:Name="UndoSlide" Y="0"/></Border.RenderTransform>
+            <Border.Effect><DropShadowEffect ShadowDepth="2" BlurRadius="16" Opacity="0.3"/></Border.Effect>
+            <StackPanel Orientation="Horizontal">
+                <TextBlock x:Name="UndoText" Text="Task deleted" VerticalAlignment="Center"
+                           FontFamily="Segoe UI" FontSize="12"
+                           Foreground="{DynamicResource PrimaryText}"/>
+                <Button Content="Undo" Click="Undo_Click" Margin="14,0,0,0"
+                        Style="{StaticResource TodoQuietButtonStyle}"
+                        Foreground="{DynamicResource TodoAccent}"/>
+            </StackPanel>
+        </Border>
+
+        <!-- save error -->
+        <Border x:Name="ErrorStrip" Background="#E0453A" CornerRadius="10"
+                Padding="14,10" Margin="16,0,16,16" Panel.ZIndex="16"
+                VerticalAlignment="Bottom" Visibility="Collapsed">
+            <TextBlock x:Name="ErrorText" Text="" FontFamily="Segoe UI" FontSize="12" Foreground="White"
+                       TextWrapping="Wrap"/>
+        </Border>
+
+        <!-- delete-list confirmation -->
+        <Grid x:Name="ConfirmOverlay" Background="{DynamicResource NotesScrim}"
+              Visibility="Collapsed" Panel.ZIndex="20">
+            <Border Background="{DynamicResource WindowBackground}" CornerRadius="12"
+                    Padding="26,22" MaxWidth="360"
+                    HorizontalAlignment="Center" VerticalAlignment="Center"
+                    RenderTransformOrigin="0.5,0.5">
+                <Border.RenderTransform><ScaleTransform x:Name="ConfirmScale" ScaleX="1" ScaleY="1"/></Border.RenderTransform>
+                <Border.Effect><DropShadowEffect ShadowDepth="2" BlurRadius="24" Opacity="0.28"/></Border.Effect>
+                <StackPanel>
+                    <TextBlock x:Name="ConfirmTitle" Text="Delete list?" FontFamily="Segoe UI" FontSize="15"
+                               FontWeight="SemiBold" Foreground="{DynamicResource PrimaryText}"
+                               TextWrapping="Wrap" HorizontalAlignment="Center" TextAlignment="Center"/>
+                    <TextBlock x:Name="ConfirmDetail" Text="" FontFamily="Segoe UI" FontSize="12"
+                               Foreground="{DynamicResource SecondaryText}"
+                               HorizontalAlignment="Center" TextAlignment="Center" TextWrapping="Wrap"
+                               Margin="0,7,0,20"/>
+                    <StackPanel Orientation="Horizontal" HorizontalAlignment="Center">
+                        <Button Content="Cancel" Click="ConfirmCancel_Click" Margin="0,0,10,0">
+                            <Button.Template>
+                                <ControlTemplate TargetType="Button">
+                                    <Border x:Name="Bg" Background="{DynamicResource SurfaceColor}" CornerRadius="18" Padding="18,10" Cursor="Hand">
+                                        <TextBlock Text="{TemplateBinding Content}" FontFamily="Segoe UI" FontSize="13"
+                                                   FontWeight="Medium" Foreground="{DynamicResource PrimaryText}"/>
+                                    </Border>
+                                    <ControlTemplate.Triggers>
+                                        <Trigger Property="IsMouseOver" Value="True">
+                                            <Setter TargetName="Bg" Property="Background" Value="{DynamicResource SurfaceHover}"/>
+                                        </Trigger>
+                                    </ControlTemplate.Triggers>
+                                </ControlTemplate>
+                            </Button.Template>
+                        </Button>
+                        <Button Content="Delete" Click="ConfirmDelete_Click">
+                            <Button.Template>
+                                <ControlTemplate TargetType="Button">
+                                    <Border x:Name="Bg" Background="#E0453A" CornerRadius="18" Padding="18,10" Cursor="Hand">
+                                        <TextBlock Text="{TemplateBinding Content}" FontFamily="Segoe UI" FontSize="13"
+                                                   FontWeight="SemiBold" Foreground="White"/>
+                                    </Border>
+                                    <ControlTemplate.Triggers>
+                                        <Trigger Property="IsMouseOver" Value="True">
+                                            <Setter TargetName="Bg" Property="Background" Value="#C93B31"/>
+                                        </Trigger>
+                                    </ControlTemplate.Triggers>
+                                </ControlTemplate>
+                            </Button.Template>
+                        </Button>
+                    </StackPanel>
+                </StackPanel>
+            </Border>
+        </Grid>
+    </Grid>
+</UserControl>

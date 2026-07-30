@@ -29,9 +29,16 @@
     <!-- The Notes ambience: a warm latte the panes float on, sibling to PomodoroRed. -->
     <SolidColorBrush x:Key="NotesAmbient" Color="#AD8A5F"/>
 
+    <!-- Todo (muted green — the colour of done) -->
+    <SolidColorBrush x:Key="TodoAmbient" Color="#6E8B5A"/>
+    <SolidColorBrush x:Key="TodoAccent" Color="#4C8A4C"/>
+    <SolidColorBrush x:Key="TodoSelectionFill" Color="#DCE7D4"/>
+    <SolidColorBrush x:Key="TodoOverdue" Color="#C0392B"/>
+
     <Color x:Key="WindowBackgroundColor">White</Color>
     <Color x:Key="PomodoroRedColor">#AF4949</Color>
     <Color x:Key="NotesAmbientColor">#AD8A5F</Color>
+    <Color x:Key="TodoAmbientColor">#6E8B5A</Color>
     <Color x:Key="PrimaryTextColor">#1C1C1E</Color>
     <Color x:Key="AccentBlueColor">#007AFF</Color>
     <Color x:Key="PowerIconFillColor">#F2F2F7</Color>

@@ -54,8 +54,10 @@ caffeine-win/
   App.xaml(.cs)           — Application entry, tray icon, keep-awake logic, the shared feature views
   MainWindow.xaml(.cs)    — Main UI window with tabs and settings
   NotesWindow.xaml(.cs)   — Optional standalone window for Notes
+  TodoWindow.xaml(.cs)    — Optional standalone window for Todo
   ThemeManager.cs         — Light/dark theme detection and switching
   Notes/                  — Note model and the notes.json store
-  Controls/               — NotesView, ScrollingTextBlock, SmoothScroller
+  Todo/                   — Task and list models, the tasks.json store, todo preferences
+  Controls/               — NotesView, TodoView, ScrollingTextBlock, SmoothScroller
   Themes/                 — Light and dark ResourceDictionary files
 ```
