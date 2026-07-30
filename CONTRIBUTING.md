@@ -10,8 +10,10 @@ Thanks for your interest in contributing! Here's how to get started.
 
 ```bash
 dotnet build
-dotnet run --project caffeine-win/caffeine-win.csproj
+dotnet run
 ```
+
+The project file lives at the repository root, so `dotnet run` needs no `--project` argument.
 
 ## Code Style
 
