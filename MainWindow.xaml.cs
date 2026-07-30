@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Threading.Tasks;
 using System.Windows;
 using System.Windows.Controls;
@@ -7,6 +7,7 @@ using System.Windows.Media;
 using System.Windows.Media.Animation;
 using System.Windows.Shapes;
 using System.Windows.Threading;
+using CaffeineWin.Todo;
 using Microsoft.Win32;
 
 namespace CaffeineWin;
@@ -33,11 +34,13 @@ public partial class MainWindow : Window
     private int _pomTotalCycles = 4;
     private TimeSpan _pomRemaining;
     private TimeSpan _pomPhaseTotal;
+    private bool _pomHeldCaffeine;
 
     private string _currentPanel = "caffeine";
     private string _previousTab = "caffeine";
     private bool _isAnimating;
     private bool _lastToggleState;
+    private bool _syncingTimerPill;
     private double _scrollTarget;
     private bool _scrollAnimating;
 
@@ -54,9 +57,11 @@ public partial class MainWindow : Window
         Loaded += (_, _) =>
         {
             InitializeThemeSelection();
+            LoadTodoSettings();
             StayGreenToggle.IsChecked = CaffeineApp.StayGreenMode;
             CaffeineStayGreenToggle.IsChecked = CaffeineApp.StayGreenMode;
             UpdateState();
+            SetSteam(CaffeineApp.IsActive);
             UpdateModeIndicator();
             PositionSegIndicator(TabCaffeine, false);
             PositionPillIndicator(TimerIndicator, TimerIndicatorX, TimerPanel, GetCheckedButton(TimerPanel), false);
@@ -66,6 +71,8 @@ public partial class MainWindow : Window
                 PositionPillIndicator(ShortIndicator, ShortIndicatorX, ShortPanel, GetCheckedButton(ShortPanel), false);
                 PositionPillIndicator(LongIndicator, LongIndicatorX, LongPanel, GetCheckedButton(LongPanel), false);
                 PositionPillIndicator(CyclesIndicator, CyclesIndicatorX, CyclesPanel, GetCheckedButton(CyclesPanel), false);
+                PositionPillIndicator(DensityIndicator, DensityIndicatorX, DensityPanel, GetCheckedButton(DensityPanel), false);
+                PositionPillIndicator(TodoSortIndicator, TodoSortIndicatorX, TodoSortPanel, GetCheckedButton(TodoSortPanel), false);
                 PositionThemeIndicator(false);
             }, DispatcherPriority.Loaded);
 
@@ -95,10 +102,73 @@ public partial class MainWindow : Window
 
     public void ShowTab(string tab)
     {
-        if (tab == "pomodoro")
-            TabPomodoro.IsChecked = true;
-        else
-            TabCaffeine.IsChecked = true;
+        switch (tab)
+        {
+            case "pomodoro": TabPomodoro.IsChecked = true; break;
+            case "notes": TabNotes.IsChecked = true; break;
+            case "todo": TabTodo.IsChecked = true; break;
+            default: TabCaffeine.IsChecked = true; break;
+        }
+    }
+
+    private string CheckedTabName() =>
+        TabTodo.IsChecked == true ? "todo" :
+        TabNotes.IsChecked == true ? "notes" :
+        TabPomodoro.IsChecked == true ? "pomodoro" : "caffeine";
+
+    private RadioButton CheckedTabButton() =>
+        TabTodo.IsChecked == true ? TabTodo :
+        TabNotes.IsChecked == true ? TabNotes :
+        TabPomodoro.IsChecked == true ? TabPomodoro : TabCaffeine;
+
+    /// <summary>Panels that need the window at its larger size, and the strip in the title bar.</summary>
+    private static bool IsWidePanel(string panel) => panel is "notes" or "todo";
+
+    private void PopOut_Click(object sender, RoutedEventArgs e)
+    {
+        if (_currentPanel == "todo") CaffeineApp.PopOutTodo();
+        else CaffeineApp.PopOutNotes();
+    }
+
+    /// <summary>
+    /// While Todo lives in its own window the tab is disabled, for the same reason as Notes:
+    /// selecting it would steal the shared view out of that window.
+    /// </summary>
+    public void SetTodoPoppedOut(bool poppedOut)
+    {
+        TabTodo.IsEnabled = !poppedOut;
+        TabTodo.ToolTip = poppedOut ? "Todo is open in its own window" : "Todo";
+
+        if (poppedOut) PopOutButton.Visibility = Visibility.Collapsed;
+    }
+
+    /// <summary>
+    /// The tab strip keeps its own centred row on the Caffeine, Pomodoro and Settings panels. Notes
+    /// needs that row's height for the editor, so there the strip moves up into the title bar, where
+    /// its left edge lines up with the floating notes card.
+    /// </summary>
+    private void PlaceTabStrip(bool inTitleBar)
+    {
+        var host = inTitleBar ? TabHostTitle : TabHostRow;
+        if (ReferenceEquals(TabStrip.Parent, host)) return;
+
+        ((Grid)TabStrip.Parent).Children.Remove(TabStrip);
+        host.Children.Add(TabStrip);
+
+        // The indicator is placed from measured layout, so it has to be re-measured after the move.
+        Dispatcher.BeginInvoke(() => PositionSegIndicator(CheckedTabButton(), false), DispatcherPriority.Loaded);
+    }
+
+    /// <summary>
+    /// While Notes lives in its own window the tab is disabled — otherwise selecting it would steal
+    /// the shared view out of that window and leave it empty.
+    /// </summary>
+    public void SetNotesPoppedOut(bool poppedOut)
+    {
+        TabNotes.IsEnabled = !poppedOut;
+        TabNotes.ToolTip = poppedOut ? "Notes is open in its own window" : null;
+
+        if (poppedOut) PopOutButton.Visibility = Visibility.Collapsed;
     }
 
     // ===== Theme =====
@@ -133,30 +203,26 @@ public partial class MainWindow : Window
             PositionPillIndicator(ThemeIndicator, ThemeIndicatorX, ThemePanel, rb, true);
     }
 
+    /// <summary>
+    /// Each feature owns the whole window while it is showing: Pomodoro turns it red, Notes turns it
+    /// a warm coffee, everything else is the plain window colour.
+    /// </summary>
+    private Color PanelBackgroundColor(string panel) => panel switch
+    {
+        "pomodoro" => (Color)FindResource("PomodoroRedColor"),
+        "notes" => (Color)FindResource("NotesAmbientColor"),
+        "todo" => (Color)FindResource("TodoAmbientColor"),
+        _ => (Color)FindResource("WindowBackgroundColor")
+    };
+
     private void RefreshThemeColors()
     {
-        var bgColor = _currentPanel == "pomodoro"
-            ? (Color)FindResource("PomodoroRedColor")
-            : (Color)FindResource("WindowBackgroundColor");
+        var bgColor = PanelBackgroundColor(_currentPanel);
 
         WindowBg.BeginAnimation(SolidColorBrush.ColorProperty, null);
         InnerBg.BeginAnimation(SolidColorBrush.ColorProperty, null);
         WindowBg.Color = bgColor;
         InnerBg.Color = bgColor;
-
-        var titleColor = _currentPanel == "pomodoro"
-            ? Colors.White
-            : (Color)FindResource("PrimaryTextColor");
-        var brush = TitleText.Foreground as SolidColorBrush;
-        if (brush != null && !brush.IsFrozen)
-        {
-            brush.BeginAnimation(SolidColorBrush.ColorProperty, null);
-            brush.Color = titleColor;
-        }
-        else
-        {
-            TitleText.Foreground = new SolidColorBrush(titleColor);
-        }
     }
 
     private void PositionThemeIndicator(bool animate)
@@ -224,6 +290,15 @@ public partial class MainWindow : Window
         if (PomShortCustomInput != null) PomShortCustomInput.Visibility = Visibility.Collapsed;
         if (PomLongCustomInput != null) PomLongCustomInput.Visibility = Visibility.Collapsed;
 
+        // Todo preferences reset; tasks and lists are user content and are deliberately left alone.
+        TodoSettings.Density = TaskDensity.Comfortable;
+        TodoSettings.Sort = TaskSort.Manual;
+        TodoSettings.CompletedOpen = true;
+        TodoSettings.DefaultDueHour = 9;
+        TodoSettings.DefaultDueMinute = 0;
+        LoadTodoSettings();
+        CaffeineApp.RefreshTodoSettings();
+
         if (_pomState == PomTimerState.Idle) PomResetToPhase();
     }
 
@@ -231,14 +306,13 @@ public partial class MainWindow : Window
 
     private void Tab_Changed(object sender, RoutedEventArgs e)
     {
-        if (CaffeinePanel == null || PomodoroPanel == null || SettingsPanel == null) return;
+        if (CaffeinePanel == null || PomodoroPanel == null || SettingsPanel == null || NotesPanel == null) return;
         if (_isAnimating) return;
 
-        var target = TabPomodoro.IsChecked == true ? "pomodoro" : "caffeine";
+        var target = CheckedTabName();
         if (target == _currentPanel && SettingsPanel.Visibility != Visibility.Visible) return;
 
-        var targetTab = TabPomodoro.IsChecked == true ? TabPomodoro : TabCaffeine;
-        PositionSegIndicator(targetTab, true);
+        PositionSegIndicator(CheckedTabButton(), true);
 
         if (SettingsPanel.Visibility == Visibility.Visible)
             _currentPanel = "settings";
@@ -254,7 +328,7 @@ public partial class MainWindow : Window
         var rb = (RadioButton)sender;
         if (rb.IsChecked != true) return;
 
-        var target = sender == TabPomodoro ? "pomodoro" : "caffeine";
+        var target = CheckedTabName();
         PositionSegIndicator(rb, true);
         _currentPanel = "settings";
         AnimateToPanel(target);
@@ -265,10 +339,7 @@ public partial class MainWindow : Window
         if (_isAnimating) return;
 
         if (SettingsPanel.Visibility == Visibility.Visible)
-        {
-            var target = TabPomodoro.IsChecked == true ? "pomodoro" : "caffeine";
-            AnimateToPanel(target);
-        }
+            AnimateToPanel(CheckedTabName());
         else
         {
             _previousTab = _currentPanel;
@@ -280,19 +351,27 @@ public partial class MainWindow : Window
     {
         _isAnimating = true;
 
+        // Notes transforms this window rather than opening its own: the panel cross-fades exactly
+        // like Pomodoro, and the window eases out to a size the editor can live in.
+        if (target == "notes") CaffeineApp.AttachNotesTo(NotesHost);
+        if (target == "todo") CaffeineApp.AttachTodoTo(TodoHost);
+
+        PlaceTabStrip(IsWidePanel(target));
+        AnimateWindowSize(IsWidePanel(target));
+
+        var poppedOut = target == "notes" ? CaffeineApp.NotesPoppedOut
+            : target == "todo" && CaffeineApp.TodoPoppedOut;
+        PopOutButton.Visibility = IsWidePanel(target) && !poppedOut
+            ? Visibility.Visible
+            : Visibility.Collapsed;
+        PopOutButton.ToolTip = target == "todo"
+            ? "Open Todo in its own window"
+            : "Open Notes in its own window";
+
         var outPanel = GetPanelByName(_currentPanel);
         var inPanel = GetPanelByName(target);
 
-        var targetColor = target == "pomodoro"
-            ? (Color)FindResource("PomodoroRedColor")
-            : (Color)FindResource("WindowBackgroundColor");
-        var titleColor = target == "pomodoro"
-            ? Colors.White
-            : (Color)FindResource("PrimaryTextColor");
-        var newTitle = target switch { "pomodoro" => "Pomodoro", "settings" => "Settings", _ => "Caffeine" };
-
-        AnimateBgColor(targetColor);
-        AnimateTitleChange(newTitle, titleColor);
+        AnimateBgColor(PanelBackgroundColor(target));
 
         var fadeOut = new DoubleAnimation(0, FadeDuration) { EasingFunction = SoftEase };
         fadeOut.Completed += (_, _) =>
@@ -304,6 +383,10 @@ public partial class MainWindow : Window
 
             if (target == "settings")
                 Dispatcher.BeginInvoke(PositionAllSettingsIndicators, DispatcherPriority.Loaded);
+            else if (target == "notes")
+                CaffeineApp.NotesView.AnimateIn();
+            else if (target == "todo")
+                CaffeineApp.TodoView.AnimateIn();
 
             var fadeIn = new DoubleAnimation(0, 1, FadeDuration) { EasingFunction = SoftEase };
             fadeIn.Completed += (_, _) =>
@@ -339,6 +422,8 @@ public partial class MainWindow : Window
         PositionPillIndicator(ShortIndicator, ShortIndicatorX, ShortPanel, GetCheckedButton(ShortPanel), false);
         PositionPillIndicator(LongIndicator, LongIndicatorX, LongPanel, GetCheckedButton(LongPanel), false);
         PositionPillIndicator(CyclesIndicator, CyclesIndicatorX, CyclesPanel, GetCheckedButton(CyclesPanel), false);
+        PositionPillIndicator(DensityIndicator, DensityIndicatorX, DensityPanel, GetCheckedButton(DensityPanel), false);
+        PositionPillIndicator(TodoSortIndicator, TodoSortIndicatorX, TodoSortPanel, GetCheckedButton(TodoSortPanel), false);
     }
 
     private void AnimateBgColor(Color to)
@@ -350,9 +435,20 @@ public partial class MainWindow : Window
 
     // ===== Gooey segmented control indicator =====
 
-    private void PositionSegIndicator(RadioButton target, bool animate)
+    /// <summary>
+    /// Moves the indicator onto a tab. Deferred a layout pass on purpose: checking a tab reveals its
+    /// label and hides the previous one's, but the template trigger that does it runs *after* the
+    /// `Checked` event this is called from — measuring now would size the indicator to the icon alone.
+    /// </summary>
+    private void PositionSegIndicator(RadioButton target, bool animate) =>
+        Dispatcher.BeginInvoke(() => PlaceSegIndicator(target, animate), DispatcherPriority.Loaded);
+
+    private void PlaceSegIndicator(RadioButton target, bool animate)
     {
         if (!target.IsLoaded) return;
+
+        // Widths have just changed for every tab in the strip, so re-measure before reading positions.
+        SegPanel.UpdateLayout();
 
         var pos = target.TranslatePoint(new Point(0, 0), SegPanel);
         var targetX = pos.X;
@@ -421,52 +517,108 @@ public partial class MainWindow : Window
         indicator.BeginAnimation(FrameworkElement.WidthProperty, wAnim);
     }
 
-    // ===== Title animation =====
+    // ===== The mark on the toggle =====
+    //
+    // The cup and its steam share one 24-unit canvas so they stay in register. Steam is the state
+    // signal: it drifts up and fades while caffeine is on, and the whole mark slides down a little
+    // to make room for it, which is the same re-centring the tray icon does.
 
-    private void AnimateTitleChange(string newText, Color toColor)
+    private static readonly Duration SteamCycle = new(TimeSpan.FromMilliseconds(2600));
+
+    private Canvas? _markHost;
+    private Path? _steamLeft;
+    private Path? _steamRight;
+    private TranslateTransform? _markNudge;
+    private TranslateTransform? _steamLeftRise;
+    private TranslateTransform? _steamRightRise;
+
+    private bool ResolveMark()
     {
-        var brush = TitleText.Foreground as SolidColorBrush;
-        if (brush == null || brush.IsFrozen)
+        if (_markNudge != null) return true;
+
+        // FindName is only valid once the template has actually been applied.
+        if (!ToggleButton.IsLoaded) return false;
+        ToggleButton.ApplyTemplate();
+
+        _markHost = ToggleButton.Template.FindName("MarkHost", ToggleButton) as Canvas;
+        _steamLeft = ToggleButton.Template.FindName("SteamLeft", ToggleButton) as Path;
+        _steamRight = ToggleButton.Template.FindName("SteamRight", ToggleButton) as Path;
+        if (_markHost == null || _steamLeft == null || _steamRight == null) return false;
+
+        // A transform declared inside a template is frozen, so hand each element its own.
+        _markNudge = new TranslateTransform(App.MarkNudgeX, App.MarkNudgeYIdle);
+        _markHost.RenderTransform = _markNudge;
+
+        _steamLeftRise = new TranslateTransform();
+        _steamRightRise = new TranslateTransform();
+        _steamLeft.RenderTransform = _steamLeftRise;
+        _steamRight.RenderTransform = _steamRightRise;
+
+        return true;
+    }
+
+    /// <summary>Starts or stops the steam and re-centres the mark to match.</summary>
+    private void SetSteam(bool steaming)
+    {
+        if (!ResolveMark()) return;
+
+        _markNudge!.BeginAnimation(TranslateTransform.YProperty,
+            new DoubleAnimation(steaming ? App.MarkNudgeYSteaming : App.MarkNudgeYIdle, AnimDuration)
+            { EasingFunction = SoftEase });
+
+        if (steaming)
         {
-            brush = new SolidColorBrush(((SolidColorBrush)TitleText.Foreground).Color);
-            TitleText.Foreground = brush;
+            // Half a cycle apart, so the two wisps never rise in lockstep.
+            StartWisp(_steamLeft!, _steamLeftRise!, TimeSpan.Zero);
+            StartWisp(_steamRight!, _steamRightRise!, TimeSpan.FromMilliseconds(1300));
+            return;
         }
-        var colorAnim = new ColorAnimation(toColor, AnimDuration) { EasingFunction = SoftEase };
-        brush.BeginAnimation(SolidColorBrush.ColorProperty, colorAnim);
 
-        var transform = TitleText.RenderTransform as ScaleTransform;
-        if (transform == null) return;
+        StopWisp(_steamLeft!, _steamLeftRise!);
+        StopWisp(_steamRight!, _steamRightRise!);
+    }
 
-        var shrink = new DoubleAnimation(0.85, new Duration(TimeSpan.FromMilliseconds(120)))
-        { EasingFunction = SoftEase };
-        var fadeOut = new DoubleAnimation(0, new Duration(TimeSpan.FromMilliseconds(120)))
-        { EasingFunction = SoftEase };
-
-        fadeOut.Completed += (_, _) =>
+    private static void StartWisp(Path wisp, TranslateTransform rise, TimeSpan offset)
+    {
+        var drift = new DoubleAnimation(1.2, -1.4, SteamCycle)
         {
-            TitleText.Text = newText;
-
-            var grow = new DoubleAnimation(1.0, new Duration(TimeSpan.FromMilliseconds(250)))
-            { EasingFunction = new CubicEase { EasingMode = EasingMode.EaseOut } };
-            var fadeIn = new DoubleAnimation(1.0, new Duration(TimeSpan.FromMilliseconds(200)))
-            { EasingFunction = SoftEase };
-
-            transform.BeginAnimation(ScaleTransform.ScaleXProperty, grow);
-            transform.BeginAnimation(ScaleTransform.ScaleYProperty, grow);
-            TitleText.BeginAnimation(OpacityProperty, fadeIn);
+            BeginTime = offset,
+            RepeatBehavior = RepeatBehavior.Forever
         };
 
-        transform.BeginAnimation(ScaleTransform.ScaleXProperty, shrink);
-        transform.BeginAnimation(ScaleTransform.ScaleYProperty, shrink);
-        TitleText.BeginAnimation(OpacityProperty, fadeOut);
+        // Fade in low, thin out at the top: a wisp that simply blinked would read as a glitch.
+        var breathe = new DoubleAnimationUsingKeyFrames
+        {
+            Duration = SteamCycle,
+            BeginTime = offset,
+            RepeatBehavior = RepeatBehavior.Forever
+        };
+        breathe.KeyFrames.Add(new LinearDoubleKeyFrame(0, KeyTime.FromPercent(0)));
+        breathe.KeyFrames.Add(new SplineDoubleKeyFrame(1, KeyTime.FromPercent(0.35), new KeySpline(0.4, 0, 0.2, 1)));
+        breathe.KeyFrames.Add(new SplineDoubleKeyFrame(0, KeyTime.FromPercent(1), new KeySpline(0.4, 0, 0.6, 1)));
+
+        rise.BeginAnimation(TranslateTransform.YProperty, drift);
+        wisp.BeginAnimation(OpacityProperty, breathe);
+    }
+
+    private static void StopWisp(Path wisp, TranslateTransform rise)
+    {
+        wisp.BeginAnimation(OpacityProperty,
+            new DoubleAnimation(0, new Duration(TimeSpan.FromMilliseconds(200))));
+
+        // Hand the value back, or the held animation keeps the wisp parked wherever it stopped.
+        rise.BeginAnimation(TranslateTransform.YProperty, null);
+        rise.Y = 0;
     }
 
     // ===== Toggle button animation =====
 
     private void AnimateToggleButton(bool activating)
     {
+        SetSteam(activating);
+
         var toggleCircle = (Ellipse)ToggleButton.Template.FindName("ToggleCircle", ToggleButton);
-        var powerIcon = (Path)ToggleButton.Template.FindName("PowerIcon", ToggleButton);
+        var powerIcon = (Path)ToggleButton.Template.FindName("CupIcon", ToggleButton);
 
         if (toggleCircle != null)
         {
@@ -485,17 +637,20 @@ public partial class MainWindow : Window
             fill.BeginAnimation(SolidColorBrush.ColorProperty, fillAnim);
         }
 
-        if (powerIcon != null)
-        {
-            var targetStrokeColor = activating
-                ? Colors.White
-                : (Color)FindResource("PowerIconStrokeColor");
+        var targetStrokeColor = activating
+            ? Colors.White
+            : (Color)FindResource("PowerIconStrokeColor");
 
-            var stroke = powerIcon.Stroke as SolidColorBrush;
+        // The steam is part of the mark, so it takes the same colour as the cup.
+        foreach (var part in new[] { powerIcon, _steamLeft, _steamRight })
+        {
+            if (part == null) continue;
+
+            var stroke = part.Stroke as SolidColorBrush;
             if (stroke == null || stroke.IsFrozen)
             {
                 stroke = new SolidColorBrush(stroke?.Color ?? Colors.Gray);
-                powerIcon.Stroke = stroke;
+                part.Stroke = stroke;
             }
             var strokeAnim = new ColorAnimation(targetStrokeColor, new Duration(TimeSpan.FromMilliseconds(350)))
             { EasingFunction = SoftEase };
@@ -540,18 +695,81 @@ public partial class MainWindow : Window
     {
         "pomodoro" => PomodoroPanel,
         "settings" => SettingsPanel,
+        "notes" => NotesPanel,
+        "todo" => TodoPanel,
         _ => CaffeinePanel
     };
+
+    // ===== Window growth for the Notes panel =====
+
+    private const double CompactWidth = 380;
+    private const double CompactHeight = 500;
+    private const double NotesWidth = 900;
+    private const double NotesHeight = 620;
+
+    /// <summary>
+    /// Eases the window between its compact size and the size Notes needs, growing about its own
+    /// centre so it does not appear to lurch sideways.
+    /// </summary>
+    private void AnimateWindowSize(bool expanded)
+    {
+        var toWidth = expanded ? NotesWidth : CompactWidth;
+        var toHeight = expanded ? NotesHeight : CompactHeight;
+
+        if (Math.Abs(ActualWidth - toWidth) < 0.5 && Math.Abs(ActualHeight - toHeight) < 0.5) return;
+
+        var toLeft = Left + (ActualWidth - toWidth) / 2;
+        var toTop = Top + (ActualHeight - toHeight) / 2;
+
+        // Only clamp when we can be sure which monitor this is — WorkArea covers the primary, so
+        // leaving a window on a secondary display alone beats yanking it across screens.
+        var work = SystemParameters.WorkArea;
+        var centre = new Point(Left + ActualWidth / 2, Top + ActualHeight / 2);
+        if (work.Contains(centre))
+        {
+            toLeft = Math.Clamp(toLeft, work.Left, Math.Max(work.Left, work.Right - toWidth));
+            toTop = Math.Clamp(toTop, work.Top, Math.Max(work.Top, work.Bottom - toHeight));
+        }
+
+        var duration = new Duration(TimeSpan.FromMilliseconds(380));
+        var ease = new CubicEase { EasingMode = EasingMode.EaseInOut };
+
+        AnimateWindowMetric(WidthProperty, ActualWidth, toWidth, duration, ease);
+        AnimateWindowMetric(HeightProperty, ActualHeight, toHeight, duration, ease);
+        AnimateWindowMetric(LeftProperty, Left, toLeft, duration, ease);
+        AnimateWindowMetric(TopProperty, Top, toTop, duration, ease);
+    }
+
+    private void AnimateWindowMetric(DependencyProperty property, double from, double to,
+        Duration duration, IEasingFunction ease)
+    {
+        var animation = new DoubleAnimation(from, to, duration) { EasingFunction = ease };
+
+        // Hand the value back afterwards: a held animation would override DragMove, leaving the
+        // window undraggable once it had been resized.
+        animation.Completed += (_, _) =>
+        {
+            BeginAnimation(property, null);
+            SetValue(property, to);
+        };
+
+        BeginAnimation(property, animation);
+    }
 
     // ===== Caffeine =====
 
     public void UpdateState()
     {
+        var active = CaffeineApp.IsActive;
+
+        // Whoever ended the session — user, tray, or auto-off — Pomodoro no longer owns it.
+        if (!active) _pomHeldCaffeine = false;
+
         if (!IsLoaded && !IsVisible) return;
 
-        var active = CaffeineApp.IsActive;
         StatusText.Text = active ? "Active" : "Inactive";
         UpdateModeIndicator();
+        SyncTimerSelection();
 
         if (active != _lastToggleState)
         {
@@ -568,15 +786,12 @@ public partial class MainWindow : Window
 
         if (CaffeineApp.IsActive)
         {
-            var elapsed = DateTime.Now - CaffeineApp.ActivatedAt;
-            var remaining = CaffeineApp.TimerMinutes > 0
-                ? TimeSpan.FromMinutes(CaffeineApp.TimerMinutes) - elapsed
-                : TimeSpan.Zero;
+            var remaining = CaffeineApp.AutoOffRemaining;
 
-            if (CaffeineApp.TimerMinutes > 0 && remaining.TotalSeconds > 0)
+            if (remaining > TimeSpan.Zero)
                 ElapsedText.Text = $"Auto-off in {FormatTime(remaining)}";
             else
-                ElapsedText.Text = $"Active for {FormatTime(elapsed)}";
+                ElapsedText.Text = $"Active for {FormatTime(DateTime.Now - CaffeineApp.ActivatedAt)}";
         }
         else
         {
@@ -600,12 +815,39 @@ public partial class MainWindow : Window
 
     private void Timer_Checked(object sender, RoutedEventArgs e)
     {
+        if (_syncingTimerPill) return;
+
         if (sender is RadioButton rb && rb.Tag is string tag && int.TryParse(tag, out int minutes))
         {
             CaffeineApp.SetTimer(minutes);
             if (TimerPanel != null && TimerIndicator != null && rb.IsLoaded)
                 PositionPillIndicator(TimerIndicator, TimerIndicatorX, TimerPanel, rb, true);
         }
+    }
+
+    // Keeps the pills honest: deactivating for any reason clears the auto-off window,
+    // so the selection must fall back to Off instead of advertising a timer that is gone.
+    private void SyncTimerSelection()
+    {
+        if (TimerPanel == null) return;
+
+        var target = CaffeineApp.TimerMinutes switch
+        {
+            15 => Timer15,
+            30 => Timer30,
+            60 => Timer60,
+            120 => Timer120,
+            _ => TimerOff
+        };
+
+        if (target.IsChecked == true) return;
+
+        _syncingTimerPill = true;
+        target.IsChecked = true;
+        _syncingTimerPill = false;
+
+        if (TimerIndicator != null && target.IsLoaded)
+            PositionPillIndicator(TimerIndicator, TimerIndicatorX, TimerPanel, target, true);
     }
 
     private void AutoStart_Changed(object sender, RoutedEventArgs e) => SetAutoStart(AutoStartToggle.IsChecked == true);
@@ -633,6 +875,25 @@ public partial class MainWindow : Window
     }
 
     // ===== Pomodoro =====
+
+    // Pomodoro releases only the keep-awake session it started itself. A session the user
+    // switched on by hand is theirs, and must survive a work phase ending.
+    private void PomAcquireCaffeine()
+    {
+        if (_pomPhase != PomodoroPhase.Work || PomKeepAwakeToggle.IsChecked != true) return;
+        if (CaffeineApp.IsActive) return;
+
+        _pomHeldCaffeine = true;
+        CaffeineApp.SetActive(true);
+    }
+
+    private void PomReleaseCaffeine()
+    {
+        if (!_pomHeldCaffeine) return;
+
+        _pomHeldCaffeine = false;
+        CaffeineApp.SetActive(false);
+    }
 
     private void PomResetToPhase()
     {
@@ -662,8 +923,7 @@ public partial class MainWindow : Window
     private void PomOnPhaseComplete()
     {
         _pomTimer.Stop();
-        if (_pomPhase == PomodoroPhase.Work && PomKeepAwakeToggle.IsChecked == true)
-            CaffeineApp.SetActive(false);
+        PomReleaseCaffeine();
 
         PomShowBalloon();
         PlayCompletionBeeps();
@@ -771,8 +1031,7 @@ public partial class MainWindow : Window
                 _pomState = PomTimerState.Running;
                 PomStartPauseButton.Content = "Pause";
                 _pomTimer.Start();
-                if (_pomPhase == PomodoroPhase.Work && PomKeepAwakeToggle.IsChecked == true)
-                    CaffeineApp.SetActive(true);
+                PomAcquireCaffeine();
                 PulseTimerRing();
                 break;
             case PomTimerState.Running:
@@ -794,16 +1053,14 @@ public partial class MainWindow : Window
         _pomTimer.Stop();
         _pomState = PomTimerState.Idle;
         PomStartPauseButton.Content = "Start";
-        if (_pomPhase == PomodoroPhase.Work && PomKeepAwakeToggle.IsChecked == true)
-            CaffeineApp.SetActive(false);
+        PomReleaseCaffeine();
         PomResetToPhase();
     }
 
     private void PomSkip_Click(object sender, RoutedEventArgs e)
     {
         _pomTimer.Stop();
-        if (_pomPhase == PomodoroPhase.Work && PomKeepAwakeToggle.IsChecked == true)
-            CaffeineApp.SetActive(false);
+        PomReleaseCaffeine();
         _pomState = PomTimerState.Idle;
         PomStartPauseButton.Content = "Start";
         PomAdvancePhase();
@@ -910,6 +1167,72 @@ public partial class MainWindow : Window
         PomUpdateDisplay();
     }
 
+    // ===== Todo settings handlers =====
+    //
+    // These write straight to TodoSettings, which is the single copy — the view re-reads it rather
+    // than caching, so a change here shows up the next time the list is built.
+
+    private void TodoDensity_Checked(object sender, RoutedEventArgs e)
+    {
+        if (sender is not RadioButton rb || rb.Tag is not string tag) return;
+        if (!Enum.TryParse<TaskDensity>(tag, out var density)) return;
+
+        Todo.TodoSettings.Density = density;
+
+        if (DensityPanel != null && rb.IsLoaded)
+            PositionPillIndicator(DensityIndicator, DensityIndicatorX, DensityPanel, rb, true);
+
+        CaffeineApp.RefreshTodoSettings();
+    }
+
+    private void TodoSort_Checked(object sender, RoutedEventArgs e)
+    {
+        if (sender is not RadioButton rb || rb.Tag is not string tag) return;
+        if (!Enum.TryParse<TaskSort>(tag, out var sort)) return;
+
+        Todo.TodoSettings.Sort = sort;
+
+        if (TodoSortPanel != null && rb.IsLoaded)
+            PositionPillIndicator(TodoSortIndicator, TodoSortIndicatorX, TodoSortPanel, rb, true);
+
+        CaffeineApp.RefreshTodoSettings();
+    }
+
+    private void TodoCompleted_Changed(object sender, RoutedEventArgs e)
+    {
+        Todo.TodoSettings.CompletedOpen = TodoCompletedToggle.IsChecked == true;
+        CaffeineApp.RefreshTodoSettings();
+    }
+
+    private void TodoDueTime_LostFocus(object sender, RoutedEventArgs e)
+    {
+        if (TimeSpan.TryParse(TodoDueTimeInput.Text.Trim(), out var time) && time < TimeSpan.FromDays(1))
+        {
+            Todo.TodoSettings.DefaultDueHour = time.Hours;
+            Todo.TodoSettings.DefaultDueMinute = time.Minutes;
+        }
+
+        // Whether it parsed or not, show what is actually stored.
+        TodoDueTimeInput.Text = $"{Todo.TodoSettings.DefaultDueHour:00}:{Todo.TodoSettings.DefaultDueMinute:00}";
+        CaffeineApp.RefreshTodoSettings();
+    }
+
+    private void LoadTodoSettings()
+    {
+        (Todo.TodoSettings.Density == TaskDensity.Compact ? DensityCompact : DensityComfortable).IsChecked = true;
+
+        var sortButton = Todo.TodoSettings.Sort switch
+        {
+            TaskSort.Date => TodoSortDate,
+            TaskSort.Title => TodoSortTitle,
+            _ => TodoSortManual
+        };
+        sortButton.IsChecked = true;
+
+        TodoCompletedToggle.IsChecked = Todo.TodoSettings.CompletedOpen;
+        TodoDueTimeInput.Text = $"{Todo.TodoSettings.DefaultDueHour:00}:{Todo.TodoSettings.DefaultDueMinute:00}";
+    }
+
     // ===== Window chrome =====
 
     private void CloseButton_Click(object sender, RoutedEventArgs e) => Hide();
@@ -921,17 +1244,28 @@ public partial class MainWindow : Window
 
     private void Window_KeyDown(object sender, KeyEventArgs e)
     {
-        if (e.Key == Key.Escape)
+        // Let the active feature claim its own shortcuts before the window acts.
+        if (_currentPanel == "notes" && CaffeineApp.NotesView.HandleKey(e))
         {
-            if (SettingsPanel.Visibility == Visibility.Visible)
-            {
-                var target = TabPomodoro.IsChecked == true ? "pomodoro" : "caffeine";
-                if (!_isAnimating) AnimateToPanel(target);
-            }
-            else
-            {
-                Hide();
-            }
+            e.Handled = true;
+            return;
+        }
+
+        if (_currentPanel == "todo" && CaffeineApp.TodoView.HandleKey(e))
+        {
+            e.Handled = true;
+            return;
+        }
+
+        if (e.Key != Key.Escape) return;
+
+        if (SettingsPanel.Visibility == Visibility.Visible)
+        {
+            if (!_isAnimating) AnimateToPanel(CheckedTabName());
+        }
+        else
+        {
+            Hide();
         }
     }
 

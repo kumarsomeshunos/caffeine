@@ -16,6 +16,7 @@ A lightweight Windows system tray application that keeps your screen awake.
 - **Todo** — A task list with everything Google Tasks does: multiple lists, due dates and times, subtasks, repeats, and reminders
 - **A colour per feature** — the window shifts with what you're doing: neutral for Caffeine, red for Pomodoro, warm coffee for Notes, green for Todo
 - **Dark & Light Themes** — Follows your Windows system theme or set manually
+- **A cup that steams when it is working** — the tray icon, the taskbar icon and the big button all share one mark, and vapour rises from it while caffeine is on
 - **System Tray** — Lives in your tray with left-click toggle and right-click menu
 - **Minimal & Fast** — Single-file executable, no installer needed, starts in under a second
 

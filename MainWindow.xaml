@@ -65,6 +65,40 @@
         </Style>
 
         <!-- Pill button — indicator handles highlight bg -->
+        <!-- Settings input. The stock TextBox brings a white field and a Windows border with it, which
+             is the one place in the app a system control showed through. SurfaceHover rather than
+             SurfaceColor for the fill: SurfaceColor and CardBackground are the same value, so the
+             field would vanish into the card it sits on. -->
+        <Style x:Key="SettingsInputStyle" TargetType="TextBox">
+            <Setter Property="FontFamily" Value="Segoe UI"/>
+            <Setter Property="FontSize" Value="13"/>
+            <Setter Property="Foreground" Value="{DynamicResource PrimaryText}"/>
+            <Setter Property="CaretBrush" Value="{DynamicResource PrimaryText}"/>
+            <Setter Property="SelectionBrush" Value="{DynamicResource AccentBlue}"/>
+            <Setter Property="Padding" Value="11,7"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="TextBox">
+                        <Border x:Name="Field" Background="{DynamicResource SurfaceHover}" CornerRadius="9"
+                                BorderThickness="1.4" BorderBrush="Transparent">
+                            <ScrollViewer x:Name="PART_ContentHost" Focusable="False"
+                                          Margin="{TemplateBinding Padding}" VerticalAlignment="Center"
+                                          HorizontalScrollBarVisibility="Hidden"
+                                          VerticalScrollBarVisibility="Hidden"/>
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsKeyboardFocusWithin" Value="True">
+                                <Setter TargetName="Field" Property="BorderBrush" Value="{DynamicResource AccentBlue}"/>
+                            </Trigger>
+                            <Trigger Property="IsEnabled" Value="False">
+                                <Setter TargetName="Field" Property="Opacity" Value="0.4"/>
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
         <Style x:Key="PillButtonStyle" TargetType="RadioButton">
             <Setter Property="RenderTransformOrigin" Value="0.5,0.5"/>
             <Setter Property="RenderTransform">
@@ -172,13 +206,27 @@
         </Style>
 
         <!-- Segmented control (transparent bg, indicator does the work) -->
+        <!-- A tab is its icon; the checked one widens to name itself. Content is the glyph, Tag the
+             label — four labelled tabs would not fit the compact window. -->
         <Style x:Key="SegmentStyle" TargetType="RadioButton">
             <Setter Property="Template">
                 <Setter.Value>
                     <ControlTemplate TargetType="RadioButton">
-                        <Border Padding="14,6" CornerRadius="8" Background="Transparent" Cursor="Hand">
-                            <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                        <Border Padding="10,6" CornerRadius="8" Background="Transparent" Cursor="Hand">
+                            <StackPanel Orientation="Horizontal">
+                                <ContentPresenter VerticalAlignment="Center"/>
+                                <TextBlock x:Name="TabLabel" Text="{TemplateBinding Tag}"
+                                           Margin="7,0,1,0" VerticalAlignment="Center"
+                                           Visibility="Collapsed"
+                                           FontFamily="Segoe UI" FontSize="13" FontWeight="Medium"
+                                           Foreground="{TemplateBinding Foreground}"/>
+                            </StackPanel>
                         </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsChecked" Value="True">
+                                <Setter TargetName="TabLabel" Property="Visibility" Value="Visible"/>
+                            </Trigger>
+                        </ControlTemplate.Triggers>
                     </ControlTemplate>
                 </Setter.Value>
             </Setter>
@@ -191,6 +239,20 @@
                     <Setter Property="Foreground" Value="{DynamicResource PrimaryText}"/>
                 </Trigger>
             </Style.Triggers>
+        </Style>
+
+        <!-- Every tab glyph: stroked, inheriting the tab's foreground so it dims when unselected. -->
+        <Style x:Key="TabGlyphStyle" TargetType="Path">
+            <Setter Property="Stroke"
+                    Value="{Binding Foreground, RelativeSource={RelativeSource AncestorType=RadioButton}}"/>
+            <Setter Property="StrokeThickness" Value="1.5"/>
+            <Setter Property="StrokeStartLineCap" Value="Round"/>
+            <Setter Property="StrokeEndLineCap" Value="Round"/>
+            <Setter Property="StrokeLineJoin" Value="Round"/>
+            <Setter Property="Stretch" Value="Uniform"/>
+            <Setter Property="Width" Value="17"/>
+            <Setter Property="Height" Value="17"/>
+            <Setter Property="VerticalAlignment" Value="Center"/>
         </Style>
 
         <!-- Action button (pomodoro) -->
@@ -321,18 +383,52 @@
                     <RowDefinition Height="*"/>
                 </Grid.RowDefinitions>
 
-                <!-- Title bar -->
-                <Border Grid.Row="0" Padding="20,14,20,8" MouseLeftButtonDown="TitleBar_MouseDown">
+                <!-- Title bar. Left padding is 14 rather than 20 so that when the tab strip moves up
+                     here (Notes only) its left edge lines up with the floating notes card below. -->
+                <Border Grid.Row="0" Padding="14,14,20,10" MouseLeftButtonDown="TitleBar_MouseDown">
                     <Grid>
-                        <TextBlock x:Name="TitleText" Text="Caffeine"
-                                   FontFamily="Segoe UI" FontSize="16" FontWeight="SemiBold"
-                                   Foreground="{DynamicResource PrimaryText}" VerticalAlignment="Center"
-                                   RenderTransformOrigin="0.5,0.5">
-                            <TextBlock.RenderTransform>
-                                <ScaleTransform ScaleX="1" ScaleY="1"/>
-                            </TextBlock.RenderTransform>
-                        </TextBlock>
-                        <StackPanel Orientation="Horizontal" HorizontalAlignment="Right">
+                        <!-- The strip is parented here on the Notes tab; see PlaceTabStrip. -->
+                        <Grid x:Name="TabHostTitle" HorizontalAlignment="Left" VerticalAlignment="Center"/>
+                        <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" VerticalAlignment="Center">
+                            <!-- Only meaningful on the Notes tab: moves Notes into its own window. -->
+                            <Button x:Name="PopOutButton" Click="PopOut_Click" Cursor="Hand" Margin="0,0,8,0"
+                                    Visibility="Collapsed" RenderTransformOrigin="0.5,0.5"
+                                    ToolTip="Open Notes in its own window">
+                                <Button.RenderTransform><ScaleTransform ScaleX="1" ScaleY="1"/></Button.RenderTransform>
+                                <Button.Template>
+                                    <ControlTemplate TargetType="Button">
+                                        <Border x:Name="PopOutBorder" Width="28" Height="28"
+                                                CornerRadius="14" Background="{DynamicResource SurfaceColor}">
+                                            <Path Data="M8,1 H1 V10 H10 V4 M5.5,5.5 L10.5,0.5 M10.5,0.5 H7 M10.5,0.5 V4"
+                                                  Stroke="{DynamicResource SecondaryText}" StrokeThickness="1.3"
+                                                  StrokeStartLineCap="Round" StrokeEndLineCap="Round"
+                                                  Width="11" Height="11"
+                                                  HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                                        </Border>
+                                        <ControlTemplate.Triggers>
+                                            <Trigger Property="IsMouseOver" Value="True">
+                                                <Setter TargetName="PopOutBorder" Property="Background" Value="{DynamicResource SurfaceHover}"/>
+                                                <Trigger.EnterActions>
+                                                    <BeginStoryboard>
+                                                        <Storyboard>
+                                                            <DoubleAnimation Storyboard.TargetProperty="RenderTransform.ScaleX" To="1.1" Duration="0:0:0.15" EasingFunction="{StaticResource BubbleEase}"/>
+                                                            <DoubleAnimation Storyboard.TargetProperty="RenderTransform.ScaleY" To="1.1" Duration="0:0:0.15" EasingFunction="{StaticResource BubbleEase}"/>
+                                                        </Storyboard>
+                                                    </BeginStoryboard>
+                                                </Trigger.EnterActions>
+                                                <Trigger.ExitActions>
+                                                    <BeginStoryboard>
+                                                        <Storyboard>
+                                                            <DoubleAnimation Storyboard.TargetProperty="RenderTransform.ScaleX" To="1" Duration="0:0:0.2" EasingFunction="{StaticResource BubbleEase}"/>
+                                                            <DoubleAnimation Storyboard.TargetProperty="RenderTransform.ScaleY" To="1" Duration="0:0:0.2" EasingFunction="{StaticResource BubbleEase}"/>
+                                                        </Storyboard>
+                                                    </BeginStoryboard>
+                                                </Trigger.ExitActions>
+                                            </Trigger>
+                                        </ControlTemplate.Triggers>
+                                    </ControlTemplate>
+                                </Button.Template>
+                            </Button>
                             <Button Click="SettingsButton_Click" Cursor="Hand" Margin="0,0,8,0"
                                     RenderTransformOrigin="0.5,0.5">
                                 <Button.RenderTransform><ScaleTransform ScaleX="1" ScaleY="1"/></Button.RenderTransform>
@@ -404,9 +500,10 @@
                     </Grid>
                 </Border>
 
-                <!-- Segmented control with gooey indicator -->
-                <Border Grid.Row="1" Margin="0,0,0,12" HorizontalAlignment="Center">
-                    <Border Background="{DynamicResource SurfaceColor}" CornerRadius="10" Padding="3">
+                <!-- Where the strip lives on every tab except Notes: its own row, centred. -->
+                <Grid x:Name="TabHostRow" Grid.Row="1" HorizontalAlignment="Center" Margin="0,0,0,12">
+                    <Border x:Name="TabStrip" Background="{DynamicResource SurfaceColor}"
+                            CornerRadius="10" Padding="3">
                         <Grid>
                             <Border x:Name="SegIndicator" Background="{DynamicResource SegIndicatorBg}" CornerRadius="8"
                                     HorizontalAlignment="Left" VerticalAlignment="Stretch" Width="75">
@@ -418,14 +515,46 @@
                                 </Border.RenderTransform>
                             </Border>
                             <StackPanel x:Name="SegPanel" Orientation="Horizontal">
-                                <RadioButton x:Name="TabCaffeine" Content="Caffeine" GroupName="Tabs" IsChecked="True"
-                                             Style="{StaticResource SegmentStyle}" Checked="Tab_Changed" Click="Tab_Clicked"/>
-                                <RadioButton x:Name="TabPomodoro" Content="Pomodoro" GroupName="Tabs"
-                                             Style="{StaticResource SegmentStyle}" Checked="Tab_Changed" Click="Tab_Clicked"/>
+                                <!-- The app's own mark: the cup and its two wisps of steam. Here it
+                                     names the feature rather than reporting its state, so it always
+                                     steams — the tray icon is the surface where steam means "on".
+                                     Same geometry as App.MarkBody/MarkSteam* — keep them in step. -->
+                                <RadioButton x:Name="TabCaffeine" Tag="Caffeine" GroupName="Tabs" IsChecked="True"
+                                             ToolTip="Caffeine"
+                                             Style="{StaticResource SegmentStyle}" Checked="Tab_Changed" Click="Tab_Clicked">
+                                    <!-- Taller box than its siblings: the steam takes the top third,
+                                         so the cup itself needs the extra height to carry the same
+                                         weight as the stopwatch and the page. -->
+                                    <Path Style="{StaticResource TabGlyphStyle}" Height="21"
+                                          Data="M4.6,8.2 L6.0,16.4 C6.2,17.6 7.0,18.2 8.1,18.2 H11.9 C13.0,18.2 13.8,17.6 14.0,16.4 L15.4,8.2 Z
+                                                M8.2,6.4 C6.9,4.9 9.5,4.0 8.2,2.0
+                                                M11.8,6.4 C10.5,4.9 13.1,4.0 11.8,2.0"/>
+                                </RadioButton>
+                                <!-- A stopwatch: crown, body, and a hand at five-to. -->
+                                <RadioButton x:Name="TabPomodoro" Tag="Pomodoro" GroupName="Tabs"
+                                             ToolTip="Pomodoro"
+                                             Style="{StaticResource SegmentStyle}" Checked="Tab_Changed" Click="Tab_Clicked">
+                                    <Path Style="{StaticResource TabGlyphStyle}"
+                                          Data="M12,6 A7.2,7.2 0 1,1 11.99,6 M12,13.2 V8.8 M12,13.2 L8.9,15.1 M9.4,2.4 H14.6 M12,2.4 V6"/>
+                                </RadioButton>
+                                <!-- A page with ruled lines. -->
+                                <RadioButton x:Name="TabNotes" Tag="Notes" GroupName="Tabs"
+                                             ToolTip="Notes"
+                                             Style="{StaticResource SegmentStyle}" Checked="Tab_Changed" Click="Tab_Clicked">
+                                    <Path Style="{StaticResource TabGlyphStyle}"
+                                          Data="M5,2.6 H19 V21.4 H5 Z M8.2,7.6 H15.8 M8.2,12 H15.8 M8.2,16.4 H13"/>
+                                </RadioButton>
+                                <!-- A tick inside a circle. -->
+                                <RadioButton x:Name="TabTodo" Tag="Todo" GroupName="Tabs"
+                                             ToolTip="Todo"
+                                             Style="{StaticResource SegmentStyle}" Checked="Tab_Changed" Click="Tab_Clicked">
+                                    <Path Style="{StaticResource TabGlyphStyle}"
+                                          Data="M12,3 A9,9 0 1,1 11.99,3 M7.6,12.2 L10.7,15.3 L16.4,9.2"/>
+                                </RadioButton>
                             </StackPanel>
                         </Grid>
                     </Border>
-                </Border>
+                </Grid>
 
                 <!-- ========== CAFFEINE TAB ========== -->
                 <Border x:Name="CaffeinePanel" Grid.Row="2" Opacity="1" RenderTransformOrigin="0.5,0.5">
@@ -441,12 +570,31 @@
                                             <Grid Width="120" Height="120">
                                                 <Ellipse x:Name="ToggleCircle" Fill="{DynamicResource PowerIconFill}"
                                                          Stroke="{DynamicResource PowerIconStrokeOutline}" StrokeThickness="1"/>
-                                                <Path x:Name="PowerIcon"
-                                                      Data="M20,4 L20,12 M20,24 A12,12 0 1,1 20,4.1"
-                                                      Stroke="{DynamicResource PowerIconStroke}" StrokeThickness="3"
-                                                      StrokeStartLineCap="Round" StrokeEndLineCap="Round"
-                                                      Stretch="Uniform" Width="42" Height="42"
-                                                      HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                                                <!-- The app mark, drawn on its own 24 grid so the cup and
+                                                     the steam stay in register instead of each being
+                                                     stretched separately. MarkHost carries the nudge that
+                                                     re-centres the composition when the steam appears, and
+                                                     both it and the wisps' own transforms are assigned in
+                                                     code — a Freezable written into a template is sealed.
+                                                     Same geometry as App.MarkBody/MarkSteam*. -->
+                                                <Viewbox Width="96" Height="96"
+                                                         HorizontalAlignment="Center" VerticalAlignment="Center">
+                                                    <Canvas x:Name="MarkHost" Width="24" Height="24">
+                                                        <Path x:Name="CupIcon"
+                                                              Data="M4.6,8.2 L6.0,16.4 C6.2,17.6 7.0,18.2 8.1,18.2 H11.9 C13.0,18.2 13.8,17.6 14.0,16.4 L15.4,8.2 Z"
+                                                              Stroke="{DynamicResource PowerIconStroke}" StrokeThickness="0.75"
+                                                              StrokeStartLineCap="Round" StrokeEndLineCap="Round"
+                                                              StrokeLineJoin="Round"/>
+                                                        <Path x:Name="SteamLeft" Opacity="0"
+                                                              Data="M8.2,6.4 C6.9,4.9 9.5,4.0 8.2,2.0"
+                                                              Stroke="{DynamicResource PowerIconStroke}" StrokeThickness="0.62"
+                                                              StrokeStartLineCap="Round" StrokeEndLineCap="Round"/>
+                                                        <Path x:Name="SteamRight" Opacity="0"
+                                                              Data="M11.8,6.4 C10.5,4.9 13.1,4.0 11.8,2.0"
+                                                              Stroke="{DynamicResource PowerIconStroke}" StrokeThickness="0.62"
+                                                              StrokeStartLineCap="Round" StrokeEndLineCap="Round"/>
+                                                    </Canvas>
+                                                </Viewbox>
                                             </Grid>
                                             <ControlTemplate.Triggers>
                                                 <Trigger Property="IsMouseOver" Value="True">
@@ -653,7 +801,7 @@
                                             <RadioButton x:Name="PomWorkCustomRadio" Content="Custom" GroupName="PomWork" Style="{StaticResource PillButtonStyle}" Checked="PomWorkCustom_Checked"/>
                                         </StackPanel>
                                     </Grid>
-                                    <TextBox x:Name="PomWorkCustomInput" Visibility="Collapsed" Width="80" HorizontalAlignment="Left" FontFamily="Segoe UI" FontSize="13" Padding="8,6" Margin="0,0,0,14" Text="25" LostFocus="PomWorkCustomInput_LostFocus"/>
+                                    <TextBox x:Name="PomWorkCustomInput" Style="{StaticResource SettingsInputStyle}" Visibility="Collapsed" Width="84" HorizontalAlignment="Left" Margin="0,0,0,14" Text="25" LostFocus="PomWorkCustomInput_LostFocus"/>
 
                                     <TextBlock Text="Short break" FontFamily="Segoe UI" FontSize="13" Foreground="{DynamicResource PrimaryText}" Margin="0,0,0,8"/>
                                     <Grid Margin="0,0,0,14">
@@ -666,7 +814,7 @@
                                             <RadioButton x:Name="PomShortCustomRadio" Content="Custom" GroupName="PomShort" Style="{StaticResource PillButtonStyle}" Checked="PomShortCustom_Checked"/>
                                         </StackPanel>
                                     </Grid>
-                                    <TextBox x:Name="PomShortCustomInput" Visibility="Collapsed" Width="80" HorizontalAlignment="Left" FontFamily="Segoe UI" FontSize="13" Padding="8,6" Margin="0,0,0,14" Text="5" LostFocus="PomShortCustomInput_LostFocus"/>
+                                    <TextBox x:Name="PomShortCustomInput" Style="{StaticResource SettingsInputStyle}" Visibility="Collapsed" Width="84" HorizontalAlignment="Left" Margin="0,0,0,14" Text="5" LostFocus="PomShortCustomInput_LostFocus"/>
 
                                     <TextBlock Text="Long break" FontFamily="Segoe UI" FontSize="13" Foreground="{DynamicResource PrimaryText}" Margin="0,0,0,8"/>
                                     <Grid Margin="0,0,0,14">
@@ -680,7 +828,7 @@
                                             <RadioButton x:Name="PomLongCustomRadio" Content="Custom" GroupName="PomLong" Style="{StaticResource PillButtonStyle}" Checked="PomLongCustom_Checked"/>
                                         </StackPanel>
                                     </Grid>
-                                    <TextBox x:Name="PomLongCustomInput" Visibility="Collapsed" Width="80" HorizontalAlignment="Left" FontFamily="Segoe UI" FontSize="13" Padding="8,6" Margin="0,0,0,14" Text="15" LostFocus="PomLongCustomInput_LostFocus"/>
+                                    <TextBox x:Name="PomLongCustomInput" Style="{StaticResource SettingsInputStyle}" Visibility="Collapsed" Width="84" HorizontalAlignment="Left" Margin="0,0,0,14" Text="15" LostFocus="PomLongCustomInput_LostFocus"/>
 
                                     <TextBlock Text="Cycles before long break" FontFamily="Segoe UI" FontSize="13" Foreground="{DynamicResource PrimaryText}" Margin="0,0,0,8"/>
                                     <Grid Margin="0,0,0,14">
@@ -709,6 +857,56 @@
                                 </StackPanel>
                             </Border>
 
+                            <!-- TODO -->
+                            <TextBlock Text="TODO" FontFamily="Segoe UI" FontSize="11" FontWeight="SemiBold"
+                                       Foreground="{DynamicResource SecondaryText}" Margin="0,0,0,10"/>
+                            <Border Background="{DynamicResource CardBackground}" CornerRadius="12" Padding="16" Margin="0,0,0,20">
+                                <StackPanel>
+                                    <TextBlock Text="Row density" FontFamily="Segoe UI" FontSize="13" Foreground="{DynamicResource PrimaryText}" Margin="0,0,0,8"/>
+                                    <Grid Margin="0,0,0,14">
+                                        <Border x:Name="DensityIndicator" Background="{DynamicResource AccentBlue}" CornerRadius="16" HorizontalAlignment="Left" VerticalAlignment="Stretch" Width="50">
+                                            <Border.RenderTransform><TranslateTransform x:Name="DensityIndicatorX" X="0"/></Border.RenderTransform>
+                                        </Border>
+                                        <StackPanel x:Name="DensityPanel" Orientation="Horizontal">
+                                            <RadioButton x:Name="DensityComfortable" Content="Comfortable" GroupName="TodoDensity" IsChecked="True" Style="{StaticResource PillButtonStyle}" Checked="TodoDensity_Checked" Tag="Comfortable"/>
+                                            <RadioButton x:Name="DensityCompact" Content="Compact" GroupName="TodoDensity" Style="{StaticResource PillButtonStyle}" Checked="TodoDensity_Checked" Tag="Compact"/>
+                                        </StackPanel>
+                                    </Grid>
+
+                                    <TextBlock Text="Sort tasks by" FontFamily="Segoe UI" FontSize="13" Foreground="{DynamicResource PrimaryText}" Margin="0,0,0,8"/>
+                                    <Grid Margin="0,0,0,14">
+                                        <Border x:Name="TodoSortIndicator" Background="{DynamicResource AccentBlue}" CornerRadius="16" HorizontalAlignment="Left" VerticalAlignment="Stretch" Width="50">
+                                            <Border.RenderTransform><TranslateTransform x:Name="TodoSortIndicatorX" X="0"/></Border.RenderTransform>
+                                        </Border>
+                                        <StackPanel x:Name="TodoSortPanel" Orientation="Horizontal">
+                                            <RadioButton x:Name="TodoSortManual" Content="My order" GroupName="TodoSort" IsChecked="True" Style="{StaticResource PillButtonStyle}" Checked="TodoSort_Checked" Tag="Manual"/>
+                                            <RadioButton x:Name="TodoSortDate" Content="Date" GroupName="TodoSort" Style="{StaticResource PillButtonStyle}" Checked="TodoSort_Checked" Tag="Date"/>
+                                            <RadioButton x:Name="TodoSortTitle" Content="Title" GroupName="TodoSort" Style="{StaticResource PillButtonStyle}" Checked="TodoSort_Checked" Tag="Title"/>
+                                        </StackPanel>
+                                    </Grid>
+
+                                    <TextBlock Text="Default due time" FontFamily="Segoe UI" FontSize="13" Foreground="{DynamicResource PrimaryText}" Margin="0,0,0,4"/>
+                                    <TextBlock Text="When a task has a date but no time" FontFamily="Segoe UI" FontSize="11" Foreground="{DynamicResource SecondaryText}" Margin="0,0,0,8"/>
+                                    <TextBox x:Name="TodoDueTimeInput" Style="{StaticResource SettingsInputStyle}"
+                                             Width="84" HorizontalAlignment="Left"
+                                             Margin="0,0,0,14" Text="09:00" LostFocus="TodoDueTime_LostFocus"/>
+
+                                    <Border Height="1" Background="{DynamicResource DividerColor}" Margin="0,0,0,14"/>
+                                    <Grid>
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/>
+                                        </Grid.ColumnDefinitions>
+                                        <StackPanel Grid.Column="0" VerticalAlignment="Center">
+                                            <TextBlock Text="Show completed" FontFamily="Segoe UI" FontSize="14" Foreground="{DynamicResource PrimaryText}"/>
+                                            <TextBlock Text="Expand the Completed section by default" FontFamily="Segoe UI" FontSize="11" Foreground="{DynamicResource SecondaryText}" Margin="0,2,0,0"/>
+                                        </StackPanel>
+                                        <CheckBox x:Name="TodoCompletedToggle" Grid.Column="1"
+                                                  Style="{StaticResource ToggleSwitchStyle}" VerticalAlignment="Center" IsChecked="True"
+                                                  Checked="TodoCompleted_Changed" Unchecked="TodoCompleted_Changed"/>
+                                    </Grid>
+                                </StackPanel>
+                            </Border>
+
                             <!-- RESET -->
                             <Button Click="ResetDefaults_Click" Cursor="Hand" HorizontalAlignment="Center" Margin="0,4,0,0">
                                 <Button.Template>
@@ -728,6 +926,22 @@
                             </Button>
                         </StackPanel>
                     </ScrollViewer>
+                </Border>
+
+                <!-- ========== NOTES TAB ========== -->
+                <!-- Hosts the shared NotesView. Selecting this tab also expands the window; the
+                     pop-out button in the title bar moves the same view into its own window. -->
+                <Border x:Name="NotesPanel" Grid.Row="2" Opacity="0" Visibility="Collapsed" RenderTransformOrigin="0.5,0.5">
+                    <Border.RenderTransform><ScaleTransform ScaleX="1" ScaleY="1"/></Border.RenderTransform>
+                    <Grid x:Name="NotesHost"/>
+                </Border>
+
+                <!-- ========== TODO TAB ========== -->
+                <!-- Hosts the shared TodoView, on the same terms as Notes: expands the window and
+                     can be popped out into a window of its own. -->
+                <Border x:Name="TodoPanel" Grid.Row="2" Opacity="0" Visibility="Collapsed" RenderTransformOrigin="0.5,0.5">
+                    <Border.RenderTransform><ScaleTransform ScaleX="1" ScaleY="1"/></Border.RenderTransform>
+                    <Grid x:Name="TodoHost"/>
                 </Border>
 
             </Grid>
