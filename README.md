@@ -38,6 +38,15 @@ of any kind** — nothing you write ever leaves your machine.
   and pans
 - Pinned notes, live search, autosave, and a **Recently Deleted** bin that keeps a note for 30 days
 
+**Prompt sets** — a note that holds a queue instead of prose
+- The `P` button beside `+` makes one: name the application it is for, then stack up the prompts
+  you mean to send it
+- **Prompts to send** and **Sent**, both numbered, with a tick to move a prompt between them and a
+  copy button that puts it on the clipboard
+- Drag by the grip to reorder, delete with a six-second undo, and see how far through you are
+  (`3/7 sent`) from the notes list itself
+- Everything else a note can do still applies — pin it, search inside it, duplicate it, bin it
+
 **Todo**
 - Multiple lists, each with its own colour
 - Due dates and times, one level of subtasks, and daily/weekly/monthly/yearly repeats
@@ -102,6 +111,7 @@ puts it back.
 |-------|-----|--------|
 | Anywhere | `Escape` | Close the window (the app stays in the tray) |
 | Notes | `Ctrl+N` | New note |
+| Notes | `Ctrl+Shift+P` | New prompt set |
 | Notes | `Ctrl+F` | Focus the search box |
 | Notes | `Ctrl+B` / `Ctrl+I` / `Ctrl+U` | Bold, italic, underline |
 | Notes | `Delete` | Delete the selected note (when the list has focus) |
@@ -121,6 +131,7 @@ you as active. The two methods are mutually exclusive — switching while active
 | What | Where |
 |------|-------|
 | Notes index, and each note's formatted body | `%AppData%\Caffeine\notes.json` and `bodies\` |
+| Each prompt set's queue | `%AppData%\Caffeine\prompts\` |
 | Tasks and lists | `%AppData%\Caffeine\tasks.json` |
 | Settings, window geometry, autostart | `HKEY_CURRENT_USER\Software\CaffeineWin` |
 

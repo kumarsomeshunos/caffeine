@@ -6,7 +6,7 @@
 
 ## Project Description
 
-A lightweight Windows system-tray application that keeps the screen — and optionally your "Available" presence in collaboration apps — awake, with a built-in Pomodoro timer and an Apple Notes-style notes app. No installer, no dependencies, no background service: one self-contained `.exe` that lives in the tray.
+A lightweight Windows system-tray application that keeps the screen — and optionally your "Available" presence in collaboration apps — awake, with a built-in Pomodoro timer, an Apple Notes-style notes app (including prompt sets: per-application queues of prompts to copy and tick off), and a task list. No installer, no dependencies, no background service: one self-contained `.exe` that lives in the tray.
 
 ---
 
@@ -70,9 +70,12 @@ _Zero third-party packages. This is deliberate — see [Key Design Decisions](#k
 ├── TodoWindow.xaml.cs    (128 L)  Window chrome, maximise handling, geometry persistence
 ├── ThemeManager.cs        (86 L)  Light/dark resolution, system-theme following, registry-backed preference
 ├── Notes/
-│   ├── Note.cs           (182 L)  The index entry: title, plain-text mirror, timestamps, bin state
-│   └── NotesStore.cs     (169 L)  notes.json index + per-note body files, atomic writes, migration,
-│                                  purge-on-load, corrupt-file quarantine
+│   ├── Note.cs           (248 L)  The index entry: kind, title, plain-text mirror, timestamps,
+│   │                              bin state, prompt counts
+│   ├── Prompt.cs          (33 L)  One prompt in a prompt note: text, sent flag, sent stamp;
+│   │                              pure FormatSentAt
+│   └── NotesStore.cs     (261 L)  notes.json index + per-note body files (bodies\ and prompts\),
+│                                  atomic writes, migration, purge-on-load, corrupt-file quarantine
 ├── Todo/
 │   ├── TaskList.cs        (52 L)  A list: name, order, colour from an 8-swatch palette
 │   ├── TodoTask.cs       (185 L)  A task: title, notes, due/time, repeat, completion, parent for subtasks;
@@ -81,10 +84,11 @@ _Zero third-party packages. This is deliberate — see [Key Design Decisions](#k
 │   │                              first-run seed, sort/filter/reminder queries
 │   └── TodoSettings.cs    (60 L)  Registry-backed todo preferences, read live so Settings and the view agree
 ├── Controls/
-│   ├── NotesView.xaml    (773 L)  The whole notes UI: list card, title/format bar/rich editor, row
-│   │                              template, button styles, slim scrollbar, confirm overlay
-│   ├── NotesView.xaml.cs (954 L)  Notes logic: selection, debounced autosave, rich-text formatting,
-│   │                              pictures, search, pin, bin, motion, smooth scrolling, persistence
+│   ├── NotesView.xaml   (1048 L)  The whole notes UI: list card, title/format bar/rich editor,
+│   │                              prompt surface, row template, button styles, slim scrollbar,
+│   │                              confirm overlay, undo toast
+│   ├── NotesView.xaml.cs(1869 L)  Notes logic: selection, debounced autosave, rich-text formatting,
+│   │                              pictures, prompt sets, search, pin, bin, motion, persistence
 │   ├── TodoView.xaml     (683 L)  The whole todo UI: lists card, tasks card, retemplated Calendar and
 │   │                              context menus, chips, confirm overlay, undo toast
 │   ├── TodoView.xaml.cs (1088 L)  Todo logic: lists, rows built in code, inline detail, due picker,
@@ -239,7 +243,26 @@ Three details carry most of the feel:
 - **Live text, deferred order.** Typing writes straight to `Note.Body`, so the row's title and preview track your keystrokes through `INotifyPropertyChanged`. `ModifiedAt` is only bumped when the 600 ms debounce fires, and the view is never refreshed while typing — WPF's live sorting is off by default, which is what stops the row you are editing from leaping to the top of the list mid-sentence. Order settles on the next create, delete, pin, search, or reopen.
 - **Rows are their own template.** The whole row lives in the `ListBoxItem` `ControlTemplate` rather than an `ItemTemplate`, so a single `IsSelected` trigger can recolour the title, preview, timestamp and pin glyph together for contrast against the amber fill. The cost is that a template with no `ContentPresenter` exposes nothing to UI Automation, so the style sets `AutomationProperties.Name` explicitly — without it every row announces `CaffeineWin.Notes.Note`.
 - **Both panes are floating cards on a tinted field.** Selecting Notes turns the whole window a warm coffee (`NotesAmbient`), the way Pomodoro turns it red — and the list and editor float on it as a matched pair of rounded cards. The editor is a card rather than the bare window precisely *because* of the tint: body text must never sit on a coloured field, and the shared view is also used in the popped-out window. Selection is a *single* indicator that moves between rows with the same stretch-and-settle keyframes as the tab indicator — see below.
-- **Empty notes evaporate.** Leaving a note whose body is whitespace removes it, so the list never accumulates `New Note` placeholders. `LeaveActiveNote` is the single choke point for this and for committing the editor, and it runs on selection change, on create, and on close. Notes already in the bin are exempt — a deleted note is a record to restore, not a draft to tidy away.
+- **Empty notes evaporate.** Leaving a note whose body is whitespace removes it, so the list never accumulates `New Note` placeholders. `LeaveActiveNote` is the single choke point for this and for committing the editor, and it runs on selection change, on create, and on close. Notes already in the bin are exempt — a deleted note is a record to restore, not a draft to tidy away. There is one other path that changes the active note, `SyncActiveNoteToSelection`, reached when `RefreshView` drops the selection because a search no longer matches the open note; it commits explicitly rather than discarding, since a filter change is not a decision to throw a draft away.
+
+### Prompt sets
+
+A **prompt note** is a note *kind*, not a second feature. `Note.Kind` picks between a formatted document and a queue of prompts; everything else about the note — the list row, pinning, search, duplication, Recently Deleted, the 600 ms debounce — is untouched code paths doing exactly what they already did. The `P` button beside `+` in the list toolbar (and `Ctrl+Shift+P`) creates one. The shortcut is `P` and not `N` for a reason: **`Ctrl+Shift+N` is WPF's own `EditingCommands.ToggleNumbering`**, so the `RichTextBox` consumes it before the host window's `KeyDown` ever reaches `HandleKey` — the shortcut would have silently numbered a paragraph instead of making a note.
+
+What changes inside the editor pane is only the body: the title field asks for an **application name**, the `Aa` toggle and the formatting bar disappear, and the `RichTextBox` gives way to two sections — `PROMPTS TO SEND (n)` and `SENT (n)` — of cards carrying a serial number, a tick, the prompt text, and copy and delete buttons.
+
+Four decisions carry it:
+
+- **The list is its own order.** Position in the JSON array is position on screen, so there is no order field to keep in step with anything. Sending a prompt is `Remove` then `Add` — a move to the very end, which puts it at the bottom of Sent and makes the section read oldest-first. Taking one back inserts it at the end of the unsent block. `NormalisePrompts` straightens out a hand-edited file on the way in and is the only place the invariant "sent always follows unsent" is enforced.
+- **`PlainText` mirrors the prompt texts**, exactly as it mirrors a document's. That is what makes search, the row preview and blank-note discard work on prompt notes with no special-casing at all — the single most valuable consequence of building this as a note kind.
+- **`RebuildPrompts` is the only thing that puts a prompt on screen,** and it runs on *structural* change only: add, delete, tick, reorder, load. Typing writes straight through to the model and never rebuilds, because a rebuild mid-keystroke would take the caret with it. This is `TodoView.Rebuild()`'s contract with the typing exemption the notes list already has.
+- **The grip is the drag handle, not the card.** A card's middle is an editable `TextBox`, where dragging has to mean selecting text. The grip is a *transparent `Border` around* the two-bar `Path` rather than the path itself — WPF hit-tests a `Path` against its stroke, which would have made a 1.3px line the whole target.
+
+Deleting a prompt is undoable rather than confirmed — a six-second toast, matching Todo's reasoning that a prompt is cheap to retype and expensive to be interrupted over. Unlike Todo the write is *not* deferred to the end of the undo window: the debounce can fire inside those six seconds for an unrelated edit, so deferral would only pretend to hold the deletion back. Copy is inert by design; it puts the text on the clipboard and flashes the icon to a tick, and marking sent stays a separate deliberate act.
+
+Two hazards the prompt file handles explicitly. `LoadPrompts` returns `null` — distinct from an empty list — when the file exists but could not be *read*, **or when it failed to parse and the quarantine rename also failed**, because in both cases the original is still sitting on disk. `_promptsReadOnly` then blocks every write for that note. Crucially it also blocks the two places that mirror the queue back into the *index* — `CommitEditor` and `RebuildPrompts` — because an empty `_prompts` is what an unreadable file looks like, and mirroring that would erase `PlainText`, zero the counts, and make `LeaveActiveNote` discard the note as blank. `IsEmpty` is not trusted for a prompt note whose set could not be read.
+
+**The index and the prompt file must be read with the same `JsonSerializerOptions` they were written with.** `Note.Kind` serialises through `JsonStringEnumConverter`, and `System.Text.Json`'s default converter reads enums as numbers only — so a `Load` that omitted the options threw `JsonException` on the very file `Save` had just written, quarantined it, and presented an empty notes list. `TodoStore.Load` already passes its options; `NotesStore` must too. This is the failure mode to remember whenever a converter is added to a store.
 
 ### Recently Deleted
 
@@ -386,7 +409,8 @@ Serialised to `notes.json`; everything else on the type is derived and marked `[
 | Field | Type | Notes |
 | ----- | ---- | ----- |
 | `Id` | `string` | `Guid` hex, assigned at construction. Used to restore the last selection |
-| `Title` | `string` | Authored in its own field. `DisplayTitle` substitutes "New Note" while it is blank |
+| `Kind` | `NoteKind` | `Text` or `Prompt`. Absent from index files written before prompt sets, which read back as `Text` — which is what they were. Serialised as a string, so the index stays inspectable |
+| `Title` | `string` | Authored in its own field. `DisplayTitle` substitutes "New Note" — or "New Prompt Set" — while it is blank |
 | `PlainText` | `string` | Plain-text mirror of the formatted body, refreshed on save. Search and row previews read this so neither has to open a document |
 | `HasImages` | `bool` | Set when the body holds pictures. Without it an image-only note looks blank to `IsEmpty` and gets discarded on the way out |
 | `Body` | `string?` | Legacy only — the single plain-text body written before rich text. `NotesStore.Load` folds it into `Title`/`PlainText` and clears it |
@@ -394,6 +418,7 @@ Serialised to `notes.json`; everything else on the type is derived and marked `[
 | `ModifiedAt` | `DateTime` | Bumped by the debounced commit, not per keystroke — this is what the list sorts on |
 | `Pinned` | `bool` | Drives `GroupKey` and the primary sort. Cleared when a note goes to the bin |
 | `DeletedAt` | `DateTime?` | Null for a live note; stamped when it moves to Recently Deleted. The single flag that decides which of the two list views a note appears in |
+| `PromptTotal` · `PromptSent` | `int` | Prompt notes only. Mirrored into the index for the same reason `PlainText` is — the row must render `3/7 sent` without opening the prompt file. Settled by `RebuildPrompts`, so they move the moment a tick does rather than waiting for the debounce |
 
 | Derived | Rule |
 | ------- | ---- |
@@ -404,8 +429,27 @@ Serialised to `notes.json`; everything else on the type is derived and marked `[
 | `EditedOnLabel` | `d MMMM yyyy 'at' HH:mm`, for the centred line above the editor |
 | `GroupKey` | `PINNED` or `NOTES` — already in display form, so the header template needs no converter |
 | `IsEmpty` | Whitespace-only body; the trigger for silent discard |
+| `IsPrompt` | `Kind == Prompt`. Drives the row's `P` badge, the count, and the editor's mode |
+| `PromptCountLabel` | `3/7 sent`, for the row beside the timestamp |
+| `AccessibleLabel` | What the row *announces*. The row template has no `ContentPresenter`, so the badge and count never reach the automation tree — this spells them out instead |
 
 `DeriveTitle`, `DerivePreview`, `FormatListTimestamp` and `FormatEditorTimestamp` are `static` and pure — the first genuinely unit-testable logic in the codebase.
+
+### `Prompt` — one entry in a prompt note's queue (persisted)
+
+Serialised as a JSON array in `prompts\<id>.json`. **The array's order is the model's order** — there is deliberately no `Order` field and no `Id`, because nothing needs one: the sections are a partition of one ordered list, and every operation is a move within it.
+
+| Field | Type | Notes |
+| ----- | ---- | ----- |
+| `Text` | `string` | The prompt itself. Multi-line; the card's `TextBox` grows to fit |
+| `Sent` | `bool` | Which of the two sections it sits in. Every sent prompt follows every unsent one |
+| `SentAt` | `DateTime?` | When it was ticked; null while it waits. Drives the `Sent today 14:22` line and orders Sent after a `NormalisePrompts` |
+
+| Derived | Rule |
+| ------- | ---- |
+| `IsEmpty` | Whitespace-only. An unsent empty prompt is pruned on the way out of the note |
+
+`Prompt.FormatSentAt` is `static` and pure, and takes `now` as a parameter like the rest of the derivation helpers.
 
 ### `TaskList` and `TodoTask` — the todo data model (persisted)
 
@@ -493,6 +537,10 @@ No network or CLI surface. "API" here means the contracts between the four compo
 | `NotesWindow` | `FlushPendingSave()` | Commit the editor and write to disk without closing | `App.Quit` |
 | `NotesStore` | `Notes` (`ObservableCollection<Note>`) | The bound collection; mutating it updates the list | `NotesWindow` |
 | `NotesStore` | `Load()` · `Save()` | JSON round-trip; `Save` is atomic and returns success | `NotesWindow` on every mutation |
+| `NotesStore` | `LoadPrompts(id)` | A prompt note's queue. Empty list = no file yet; **`null` = the file is there and unreadable**, and the caller must not write over it | `NotesView.LoadPromptSet`, `Duplicate_Click` |
+| `NotesStore` | `SavePrompts(id, prompts)` · `DeletePrompts(id)` | Atomic write / remove, matching the body-file pair | `NotesView`, purge-on-load |
+| `NotesStore` | `static PromptFolder` · `PromptPath(id)` | `%AppData%\Caffeine\prompts\<id>.json` | — |
+| `Prompt` | `static FormatSentAt(sent, now)` | The stamp under a sent prompt | `Prompt`'s card |
 | `NotesStore` | `LastError` | Non-null after a failed load or save; rendered as a red strip | `NotesWindow.ReportStoreError` |
 | `NotesStore` | `static FolderPath` · `static FilePath` | `%AppData%\Caffeine\notes.json` | — |
 | `Note` | `static DeriveTitle` · `DerivePreview` · `FormatListTimestamp` · `FormatEditorTimestamp` | Pure derivation from the body | `Note`'s own properties |
@@ -544,6 +592,10 @@ No network or CLI surface. "API" here means the contracts between the four compo
 | **Todo preferences are read live from the registry through `TodoSettings`** | Load into fields on startup, as everything else does | Settings and the view are two surfaces over the same four values, and the app already has one bug-shaped precedent for hand-syncing duplicated settings (`StayGreenToggle` / `CaffeineStayGreenToggle`). A static that reads the key on access cannot go out of step; the values are tiny and read at most a few times per rebuild. |
 | **Reminders live in `App`, not `TodoView`** | Check on the view's own timer | A task must announce itself whether or not the tab has ever been opened, and the view is created lazily on first use. A 30-second `DispatcherTimer` in `App` is the only place with that guarantee. `TodoTask.Notified` keeps it to once per due date. |
 | **Recurrence is five presets, applied on completion** | Full RRULE-style custom rules | Google Tasks itself offers little more, and a rules engine would be the largest thing in the codebase for a feature that is nearly always "every week". Advancing the due date on completion — rather than spawning a new task — keeps one row, one history, and no duplicates to clean up. |
+| **A prompt set is a note *kind*, not a sixth panel** | Its own tab and view beside Notes and Todo; a filter or folder inside Notes | A prompt set is a note that happens to hold a queue instead of prose — it wants the same list, the same search, the same pin and the same 30-day bin. Making it `Note.Kind` meant the list, the store, the debounce, the bin and blank-discard were all *existing* code that needed no changes at all; only the editor pane's body swaps. A sixth tab would not have fitted the strip either (the fifth was already the documented limit), and folders are explicitly out of scope. |
+| **Prompts in `prompts\<id>.json`, one file per note** | Inline in `notes.json`; reuse the `bodies\` `XamlPackage` | Exactly the split `bodies\` already justifies: the index is rewritten on every debounce, and a set of twenty long prompts inlined there would be re-serialised on every keystroke's pause and make `notes.json` unreadable. A `XamlPackage` was wrong for the same reason it is right for documents — there is nothing binary or formatted in a prompt, and JSON stays inspectable. Cost: a third file kind to keep in step, so duplication copies it and both deletions remove it. |
+| **The array's order is the model's order — no `Order` field, no `Id`** | An `Order` int per prompt, as `TodoTask` has; sort Sent by `SentAt` | `TaskList` needs `Order` because tasks move between lists and sort modes. A prompt set is one ordered list partitioned in two, where every operation is a move within it — so sending is `Remove` then `Add`, and JSON arrays already preserve exactly that. It removes a whole class of "the order field disagrees with the list" bug, and `NormalisePrompts` re-establishes the invariant in one place on load. |
+| **Copy is inert; the tick is what marks sent** | Copy also marks it sent (one click for the whole loop); copy marks sent with an Undo toast | Owner's call. Copying a prompt to edit it elsewhere, or to re-send an old one, must not silently move it — and a Copy that sometimes mutates and sometimes does not (on a Sent card) is two behaviours behind one icon. The icon flashing to a tick for 1.2 s is the acknowledgement instead. |
 | **`ScrollingTextBlock` as a hand-rolled `UserControl`** | Plain `TextBlock`; an animation library | Per-character odometer transitions are the app's signature motion. Diffing only changed characters keeps digit-by-digit clock updates cheap. |
 
 ---
@@ -580,12 +632,14 @@ _This project has **no environment variables** and no config file. There are two
 | ---- | ------ | ---------- | ----- |
 | `%AppData%\Caffeine\notes.json` | Indented JSON array of `Note` — the **index** only | `NotesStore.Save` | Titles, plain-text mirrors, timestamps, pin and bin state. Written on every create, delete, pin, duplicate, selection change, window close, app exit, and 600 ms after typing stops |
 | `%AppData%\Caffeine\bodies\<id>.xamlpkg` | WPF `XamlPackage` | `NotesStore.SaveBody` | One per note: the formatted body with any pictures packaged inside it. Written only when the body is actually dirty, so a 2 MB screenshot is not re-serialised on every keystroke's debounce |
+| `%AppData%\Caffeine\prompts\<id>.json` | JSON array of `Prompt` | `NotesStore.SavePrompts` | One per **prompt** note, in place of a body file — a note has one or the other, never both. Array order is the on-screen order; unsent entries first. Written only when the set is dirty |
 | `%AppData%\Caffeine\tasks.json` | Indented JSON `{ Lists, Tasks }` | `TodoStore.Save` | Both collections in one snapshot — they are always read and written together, and a task without its list is meaningless. Written on every create, edit, complete, reorder, list change, and when an undo window closes |
 | `%AppData%\Caffeine\*.tmp` | — | all writers | Transient. Written first, then `File.Move(overwrite: true)` — a crash mid-write cannot tear the real file |
 | `%AppData%\Caffeine\notes.corrupt-<stamp>.json` | — | `NotesStore.Quarantine` | Only on a `JsonException`. The unreadable file is renamed aside so the next save cannot destroy it, and the failure is surfaced in the window |
 | `%AppData%\Caffeine\tasks.corrupt-<stamp>.json` | — | `TodoStore.Quarantine` | Same rule for tasks |
+| `%AppData%\Caffeine\prompts\<id>.corrupt-<stamp>.json` | — | `NotesStore.QuarantinePrompts` | Same rule per prompt set. Only a *parse* failure quarantines; a read failure instead returns `null` and blocks writes for that note, which is what stops a save emptying a file we could not open |
 
-The app must start correctly with none of this present: a missing index means an empty list and the "No Notes" state, and a missing *body* file falls back to rebuilding the document from the note's plain-text mirror — which is also how notes written before rich text get their first body file.
+The app must start correctly with none of this present: a missing index means an empty list and the "No Notes" state, a missing *body* file falls back to rebuilding the document from the note's plain-text mirror — which is also how notes written before rich text get their first body file — and a missing *prompt* file means an empty queue with an `Add prompt` row.
 
 ---
 
@@ -613,7 +667,7 @@ No network calls, no telemetry, no accounts, no third-party services. The only e
 
 This is a deliberate consequence of the architecture, not an oversight to paper over: the timing logic, the Pomodoro machine, and the state transitions all live in code-behind coupled to named XAML elements, so nothing is reachable from a test host today. **Anything genuinely testable should be extracted first rather than tested through the UI.** The natural first candidates, in order: `FormatTime`, `PomAdvancePhase`, the auto-off elapsed comparison, and the progress-arc geometry maths — all pure functions trapped inside `MainWindow`.
 
-`TodoTask.FormatDue` and `TodoTask.NextOccurrence`, and every query on `TodoStore`, are pure and parameterised the same way — they take `now` rather than reading the clock. `Note`'s four `static` derivation methods are the same exception: `DeriveTitle`, `DerivePreview`, `FormatListTimestamp` and `FormatEditorTimestamp` take their inputs as parameters (including `now`, so the timestamp cases are deterministic) and touch no UI. If a test project is ever added, start there — it is the only logic in the codebase already shaped for it.
+`Prompt.FormatSentAt`, `TodoTask.FormatDue` and `TodoTask.NextOccurrence`, and every query on `TodoStore`, are pure and parameterised the same way — they take `now` rather than reading the clock. `Note`'s four `static` derivation methods are the same exception: `DeriveTitle`, `DerivePreview`, `FormatListTimestamp` and `FormatEditorTimestamp` take their inputs as parameters (including `now`, so the timestamp cases are deterministic) and touch no UI. If a test project is ever added, start there — it is the only logic in the codebase already shaped for it.
 
 Until then, treat this as the manual regression checklist for any change that touches state:
 
@@ -667,6 +721,18 @@ Until then, treat this as the manual regression checklist for any change that to
 23k. Todo — settings: change row density, sort and default due time, and toggle the Completed default. Each must be reflected in the list without reopening the tab. `Reset to Defaults` must restore all four **and leave your tasks and lists alone**.
 23l. Todo — the retemplated controls: the calendar must be dark, with today in green, adjacent-month days dimmed, working ‹ › arrows and a month/year drill-up. Right-click menus must be dark with a subtle separator and a chevron on `Move to`. Nothing may flash white.
 23m. Todo — resilience: corrupt `tasks.json` and relaunch. The app must start, show the error, and leave `tasks.corrupt-*.json` beside it. Separately, delete `%AppData%\Caffeine` entirely and launch → first run must seed a single `My Tasks` list and work.
+24. Prompt sets — the shape: click `P` beside `+`. The title must ask for an **Application name**, the `Aa` toggle must be gone, and the body must show `PROMPTS TO SEND (1)` over one empty card with a `Type or paste a prompt…` watermark. Switch to an ordinary note and confirm the formatting bar and its toggle come *back* — the bar is collapsed, not merely folded, on a prompt note, so Tab must not reach B/I/U there either.
+24a. Prompt sets — the loop: type a prompt, add two more from `+ Add prompt`, and confirm they number 1, 2, 3. Tick the middle one → it leaves the queue, the remaining two renumber to 1 and 2, and it appears under `SENT (1)` with a `Sent today HH:mm` line. Tick two more and confirm Sent reads **oldest first**, newest at the bottom. Tick a sent one back and confirm it returns to the *bottom* of the queue, its stamp gone.
+24b. Prompt sets — copy and delete: Copy puts the prompt on the clipboard, flashes the icon to a tick for about a second, and **does not** mark it sent. Delete removes the card and offers Undo for six seconds; click Undo and it comes back where it was. Let a second one expire and confirm it is gone from `prompts\<id>.json` on disk.
+24c. Prompt sets — reordering: drag a card by its **grip** (the two bars at the left) above and below its neighbours; the numbers must resettle on drop and survive a restart. Dragging from the middle of a card must select text, not reorder. Sent cards have no grip.
+24d. Prompt sets — the list row: the row shows a `P` badge before the title and `· 3/7 sent` beside the timestamp, both updating the instant you tick. Select it and confirm the badge inverts so it stays legible on the amber fill. A screen reader must announce "*name*, prompt set, 3 of 7 sent".
+24e. Prompt sets — as a note: pin it, search for text inside one of its prompts (the plain-text mirror should find it), duplicate it (the copy must get its **own** `prompts\<id>.json`, so editing one must not change the other), delete it to Recently Deleted, and restore it. In the bin the cards must be read-only — no ticks, no delete buttons, no `Add prompt` — but Copy must still work.
+24f. Prompt sets — blank discard: create one, type nothing at all, select another note → it must vanish, and leave **no** file behind in `prompts\`. Then create one, give it only an application name, and confirm it *survives* — a named set with no prompts yet is legitimate.
+24g. Prompt sets — resilience: with the app closed, corrupt a `prompts\<id>.json`. Reopen that note → the error toast appears, the file is set aside as `<id>.corrupt-*.json`, and the note still opens. Separately, confirm an index written before this feature loads with every note reading as an ordinary text note.
+24h. **The index round-trip — run this after ANY change to `NotesStore`'s serialiser.** Edit any note at all, quit from the tray, relaunch, open Notes. Every note must still be there and **no `notes.corrupt-*.json` may appear**. `Save` and `Load` must use the same `JsonSerializerOptions`; when they did not, `Note.Kind` was written as a string, failed to read back as a number, and the whole index was quarantined on the next launch.
+24i. Prompt sets — the bin is genuinely read-only: note a prompt set's `PromptTotal`/`PromptSent` in `notes.json` and the modified time of its `prompts\<id>.json`, then delete it, open Recently Deleted, let it be selected, and leave the bin. Neither the file nor the counts may change.
+24j. Prompt sets — no lost write on a refresh: type into a prompt card and, **within 600 ms**, type a search query the note does not match so it drops out of the list. Clear the search and reopen it — what you typed must be there. Any path that changes the active note without going through `LeaveActiveNote` has to commit first; `SyncActiveNoteToSelection` is the one that did not.
+24k. Prompt sets — theme: with a prompt set open, switch Light ↔ Dark in Settings. The cards, section headers, ticks and grips must follow immediately. They are built in code, so their brushes are resolved once — only the `ThemeChanged` rebuild makes them move.
 22. Notes — motion: the window eases up on open rather than snapping; switching notes cross-fades the editor; the selected row slides in from the left while the amber fill appears instantly; toolbar and dialog buttons scale on hover and squash on press; the wheel eases the list rather than stepping it. Nothing should be left stuck mid-animation — check for a half-faded editor after rapid clicking between notes.
 
 ---
@@ -709,6 +775,8 @@ dotnet publish -c Release -r win-x64 --self-contained
 - [ ] **The circular title-bar button template exists three times** — inline in `MainWindow.xaml` for the gear, close and pop-out buttons, and once as `TitleBarButtonStyle` in `NotesWindow.xaml`. Easing resources are likewise declared per file. The right fix is a `Themes/Shared.xaml` merged in `App.xaml`; it keeps being deferred because it means restructuring a 757-line XAML file that no individual change has had reason to touch.
 - [ ] **`NotesWindow.xaml.cs` guards re-entrancy with two boolean flags** (`_suppressSelectionChange`, `_suppressEditorChange`). They are correct but fragile — every new path that assigns `SelectedItem` or `Editor.Text` programmatically has to remember them. A small "programmatic update" scope helper would make this harder to get wrong.
 - [ ] **Notes ordering is only correct after a refresh.** Positions settle on create/delete/pin/search/reopen but not while typing (deliberate — see Key Design Decisions). The consequence is that a long editing session leaves the list in a stale order until one of those events happens.
+- [ ] **`TodoView` builds its rows with `(Brush)FindResource(...)` and never rebuilds on a theme change.** Brushes resolved in code are a one-time lookup, so a Light↔Dark switch leaves an open task list on the old palette until the next edit happens to call `Rebuild()`. `NotesView` now subscribes to `ThemeManager.ThemeChanged` for exactly this reason (`RebuildPrompts`); `TodoView` wants the same four lines. `ThemeChanged` otherwise has a single subscriber in the whole repo.
+- [ ] **A discarded blank note can orphan its body file.** `LeaveActiveNote` removes a note whose body it has already written during the debounce — type into a new note, clear it, navigate away, and `bodies\<id>.xamlpkg` stays behind with no index entry pointing at it. The prompt path handles this (`DeletePrompts` on discard); the document path predates it and does not. One line in the same place fixes it.
 - [ ] **No tests, no analyzers, no CI check beyond compilation.**
 
 ---
@@ -731,7 +799,9 @@ _(The `ScrollingTextBlock` accessible-text doubling recorded here was fixed on 2
 - [ ] Global hotkeys, CLI arguments, scripting/automation surface.
 - [ ] Pomodoro history or statistics — the timer is a timer. It has no connection to Todo, and starting a work phase does not pick up a task.
 - [ ] Notes: **folders or categories** — notes remain a single flat list. (Rich text and Recently Deleted were both in this list and are now built.)
-- [ ] Notes: **checklists**, **tables**, text **colour/highlight**, a monospaced style, and link detection. The formatting set stops at bold/italic/underline/strikethrough, a heading style, and bulleted/numbered lists.
+- [ ] Notes: **checklists inside a document**, **tables**, text **colour/highlight**, a monospaced style, and link detection. The formatting set stops at bold/italic/underline/strikethrough, a heading style, and bulleted/numbered lists. (A *prompt set* is a checklist of sorts, but it is a separate note **kind** with its own storage rather than a tickable paragraph in a `FlowDocument` — the thing this line rules out.)
+- [ ] Prompt sets: **variables or placeholders** in a prompt, templates, sending to an AI provider, or any other integration. Caffeine puts text on the clipboard; what happens next is not its business — and a network call would break the app's central promise.
+- [ ] Prompt sets: **more than one queue per note**, nesting, tags, or a cross-note view of every unsent prompt. A prompt set is one application's queue, and the note list is the index of applications.
 - [ ] Notes: attachments other than pictures (PDFs, arbitrary files), and any editing of an inserted picture beyond the automatic width limit.
 - [ ] Notes: an **Empty Bin** action that clears Recently Deleted in one go — deliberately left out; notes purge themselves after 30 days and can be deleted individually.
 - [ ] Notes: sync, sharing, export, attachments, images, or a user-selectable sort order.
@@ -774,4 +844,5 @@ _(The `ScrollingTextBlock` accessible-text doubling recorded here was fixed on 2
 | 2026-07-30 | Gave the mark its vapour. Redrew the two steam wisps symmetrically about the cup's centre with a wider, calmer curve, put a steaming cup on the Caffeine tab (where the mark names the feature rather than reporting state, and a bare cup read as a bucket), and made the toggle button steam while caffeine is on — each wisp drifting up and fading over 2.6 s, half a cycle apart, with the cup settling lower to make room. The toggle's mark moved onto a shared 24-unit canvas inside a `Viewbox` so the cup and the wisps stay in register instead of each stretching to its own box. |
 | 2026-07-30 | Fixed the tab indicator sizing to the icon alone instead of icon-plus-label: the label is revealed by a template trigger on `IsChecked`, and WPF raises the `Checked` event *before* it applies that trigger, so measuring synchronously read the pre-reveal width. `PositionSegIndicator` now defers to `DispatcherPriority.Loaded` and measures once layout has actually run. |
 | 2026-07-30 | Switched the tab strip from text to icons — cup, stopwatch, page, tick — with the label revealed only on the selected tab, so a fourth tab fits without widening the window. Added `TodoAmbient`/`TodoAccent`/`TodoSelectionFill`/`TodoOverdue` to both themes. Retemplated `Calendar`, `ContextMenu` and `MenuItem`, the first stock Windows-styled controls the app has used: cells needed `CalendarDayButtonStyle` rather than an implicit style, separators resolve `MenuItem.SeparatorStyleKey`, and `Data="{TemplateBinding Tag}"` silently yields no geometry. Fixed a crash from closing a `Popup` inside a mouse-up (WPF re-delivers the event into the tree it is tearing down), a picker that would not open for an already-dated task, and `Tab_Clicked` still mapping only three tabs so leaving Settings on Todo landed on Caffeine. Extracted `SmoothScroller` so both feature views share one copy. |
+| 2026-08-05 | Added **prompt sets** to Notes: a `P` button beside `+` (and `Ctrl+Shift+P` — `Ctrl+Shift+N` is WPF's own ToggleNumbering and never reaches the window) creates a note whose body is a queue of prompts rather than a document. The title asks for an application name; the body holds `PROMPTS TO SEND` and `SENT` sections of numbered cards with a tick, copy and delete, drag-to-reorder by a grip, a `Sent today HH:mm` stamp, and a six-second Undo on delete. Built as a new `Note.Kind` rather than a sixth panel, which meant the list, search, pin, duplicate, Recently Deleted and blank-discard all worked unchanged — `PlainText` mirrors the prompt texts, so nothing downstream needed to know. New `Notes/Prompt.cs`; new `prompts\<id>.json` per note beside `bodies\`, with the same atomic write and quarantine rules plus a read-failure path that blocks writes rather than emptying a file it could not open. The list row gained a `P` badge and a `3/7 sent` count, both spelled into `AccessibleLabel` because the row template has no `ContentPresenter`. Still zero NuGet packages. |
 | 2026-07-29 | Made Notes visually part of Caffeine rather than a Windows-styled window: replaced the rectangular caption buttons and red close hover with the tray window's 28px `SurfaceColor` circles (`─ □ ✕`, `❐` when maximised) including the 1.1 hover scale, matched the title bar's padding and 16px SemiBold title, turned the toolbar icons into the same circles, and aligned every radius, padding and type size to the tray window (see Shared control geometry). The editor's date line now uses `ScrollingTextBlock`, giving Notes the app's odometer motion. Fixed the `ScrollingTextBlock` accessible-text doubling as a prerequisite — that also corrects the tray window's five existing usages, which previously read "Active" as `AAccttiivvee`. |

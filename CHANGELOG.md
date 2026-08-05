@@ -4,6 +4,25 @@ All notable changes to Caffeine are recorded here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project uses
 [semantic versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+
+**Prompt sets** — a new kind of note, for keeping a queue of prompts per application
+
+- A `P` button beside `+` in the notes toolbar, and `Ctrl+Shift+P`, create one. Its title field asks
+  for an application name rather than a note title
+- Two numbered sections, **Prompts to send** and **Sent**, with a tick that moves a prompt between
+  them and stamps it with the time it went
+- Copy puts a prompt on the clipboard and flashes to a tick; it deliberately does not mark it sent
+- Drag by the grip to reorder the queue; delete offers Undo for six seconds
+- The notes list shows a `P` badge and a `3/7 sent` count on the row, and screen readers announce both
+- Storage alongside the existing note bodies: `%AppData%\Caffeine\prompts\<id>.json`, written
+  atomically, quarantined rather than overwritten if it fails to parse, and never written over if it
+  failed to open
+- Prompt sets are notes throughout — pin, search (prompt text is indexed), duplicate, and the 30-day
+  Recently Deleted bin all work on them unchanged
+
 ## [2.0.0] — 2026-07-30
 
 Caffeine grew from one tool into four. The tray window is now a place you keep things — notes and
