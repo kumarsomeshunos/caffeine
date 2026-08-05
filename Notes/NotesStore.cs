@@ -3,27 +3,37 @@ using System.Collections.Generic;
 using System.Collections.ObjectModel;
 using System.IO;
 using System.Text.Json;
+using System.Text.Json.Serialization;
 
 namespace CaffeineWin.Notes;
 
 /// <summary>
 /// Two-part storage under %AppData%\Caffeine. <c>notes.json</c> is a small index — titles, plain-text
-/// mirrors, timestamps — and each note's formatted body is its own file in <c>bodies\</c>. Keeping
-/// bodies out of the index matters once notes contain images: the index stays readable and cheap to
-/// rewrite on every keystroke's debounce, and a 2 MB screenshot doesn't get re-serialised with it.
+/// mirrors, timestamps — and each note's body is its own file: a formatted document in <c>bodies\</c>,
+/// or a prompt set in <c>prompts\</c>. Keeping bodies out of the index matters once notes contain
+/// images: the index stays readable and cheap to rewrite on every keystroke's debounce, and a 2 MB
+/// screenshot doesn't get re-serialised with it.
 /// </summary>
 public sealed class NotesStore
 {
-    private static readonly JsonSerializerOptions SerializerOptions = new() { WriteIndented = true };
+    private static readonly JsonSerializerOptions SerializerOptions = new()
+    {
+        WriteIndented = true,
+        Converters = { new JsonStringEnumConverter() }
+    };
 
     public static string FolderPath =>
         Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "Caffeine");
 
     public static string FilePath => Path.Combine(FolderPath, "notes.json");
     public static string BodyFolder => Path.Combine(FolderPath, "bodies");
+    public static string PromptFolder => Path.Combine(FolderPath, "prompts");
 
     /// <summary>A XAML package: the formatted body plus any images it contains.</summary>
     public static string BodyPath(string id) => Path.Combine(BodyFolder, $"{id}.xamlpkg");
+
+    /// <summary>A prompt note's queue, in order. Plain JSON — there is nothing binary in it.</summary>
+    public static string PromptPath(string id) => Path.Combine(PromptFolder, $"{id}.json");
 
     public ObservableCollection<Note> Notes { get; } = new();
 
@@ -51,7 +61,9 @@ public sealed class NotesStore
         List<Note>? loaded;
         try
         {
-            loaded = JsonSerializer.Deserialize<List<Note>>(json);
+            // The same options Save uses. They carry the enum converter, and reading back a string
+            // enum without it throws — which would quarantine a perfectly good index.
+            loaded = JsonSerializer.Deserialize<List<Note>>(json, SerializerOptions);
         }
         catch (JsonException ex)
         {
@@ -74,6 +86,7 @@ public sealed class NotesStore
             if (note.IsDeleted && note.DaysLeft <= 0)
             {
                 DeleteBody(note.Id);
+                DeletePrompts(note.Id);
                 rewrite = true;
                 continue;
             }
@@ -181,12 +194,103 @@ public sealed class NotesStore
         }
     }
 
+    // ===== Prompt sets =====
+
+    /// <summary>
+    /// Reads a prompt note's queue. An empty list means there is no file yet — the first-run path.
+    /// <c>null</c> means the file is there but could not be read, and the caller must not write over
+    /// it; a file that fails to *parse* is quarantined instead, so an empty list is safe there.
+    /// </summary>
+    public List<Prompt>? LoadPrompts(string id)
+    {
+        var path = PromptPath(id);
+        if (!File.Exists(path)) return new List<Prompt>();
+
+        string json;
+        try
+        {
+            json = File.ReadAllText(path);
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            LastError = $"Couldn't open this prompt set — {ex.Message}";
+            return null;
+        }
+
+        try
+        {
+            return JsonSerializer.Deserialize<List<Prompt>>(json, SerializerOptions) ?? new List<Prompt>();
+        }
+        catch (JsonException ex)
+        {
+            // Set it aside before anything can save over it, exactly as notes.json does. If that
+            // failed the file is still sitting there, so refuse the write rather than destroy it.
+            var kept = QuarantinePrompts(id);
+
+            if (kept == null)
+            {
+                LastError = $"This prompt set is unreadable — {ex.Message}";
+                return null;
+            }
+
+            LastError = $"This prompt set was unreadable and has been kept as {Path.GetFileName(kept)}";
+            return new List<Prompt>();
+        }
+    }
+
+    public bool SavePrompts(string id, List<Prompt> prompts)
+    {
+        try
+        {
+            Directory.CreateDirectory(PromptFolder);
+
+            var temp = PromptPath(id) + ".tmp";
+            File.WriteAllText(temp, JsonSerializer.Serialize(prompts, SerializerOptions));
+            File.Move(temp, PromptPath(id), overwrite: true);
+
+            LastError = null;
+            return true;
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            LastError = $"Couldn't save this prompt set — {ex.Message}";
+            return false;
+        }
+    }
+
+    public void DeletePrompts(string id)
+    {
+        try
+        {
+            var path = PromptPath(id);
+            if (File.Exists(path)) File.Delete(path);
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            LastError = $"Couldn't remove this prompt set — {ex.Message}";
+        }
+    }
+
     private static string? Quarantine()
     {
         try
         {
             var kept = Path.Combine(FolderPath, $"notes.corrupt-{DateTime.Now:yyyyMMdd-HHmmss}.json");
             File.Move(FilePath, kept, overwrite: false);
+            return kept;
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            return null;
+        }
+    }
+
+    private static string? QuarantinePrompts(string id)
+    {
+        try
+        {
+            var kept = Path.Combine(PromptFolder, $"{id}.corrupt-{DateTime.Now:yyyyMMdd-HHmmss}.json");
+            File.Move(PromptPath(id), kept, overwrite: false);
             return kept;
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)

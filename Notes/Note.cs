@@ -6,6 +6,9 @@ using System.Text.Json.Serialization;
 
 namespace CaffeineWin.Notes;
 
+/// <summary>What a note's body actually is: a formatted document, or a queue of prompts.</summary>
+public enum NoteKind { Text, Prompt }
+
 /// <summary>
 /// One note's index entry. The formatted body lives in its own file (see <see cref="NotesStore"/>);
 /// what is kept here is everything the list needs to render and search without opening a document —
@@ -14,6 +17,7 @@ namespace CaffeineWin.Notes;
 public sealed class Note : INotifyPropertyChanged
 {
     public const string UntitledLabel = "New Note";
+    public const string UntitledPromptLabel = "New Prompt Set";
     public const string NoPreviewLabel = "No additional text";
 
     /// <summary>How long a deleted note is kept before it is purged on load.</summary>
@@ -24,6 +28,9 @@ public sealed class Note : INotifyPropertyChanged
     private DateTime _modifiedAt = DateTime.Now;
     private bool _pinned;
     private DateTime? _deletedAt;
+    private NoteKind _kind;
+    private int _promptTotal;
+    private int _promptSent;
 
     public string Id { get; set; } = Guid.NewGuid().ToString("N");
     public DateTime CreatedAt { get; set; } = DateTime.Now;
@@ -38,6 +45,7 @@ public sealed class Note : INotifyPropertyChanged
             _title = value ?? "";
             Raise(nameof(Title));
             Raise(nameof(DisplayTitle));
+            Raise(nameof(AccessibleLabel));
             Raise(nameof(IsEmpty));
         }
     }
@@ -99,6 +107,54 @@ public sealed class Note : INotifyPropertyChanged
     }
 
     /// <summary>
+    /// Text note or prompt set. Written by versions that only had one kind of note, so an index
+    /// entry without it reads back as <see cref="NoteKind.Text"/> — which is what it was.
+    /// </summary>
+    public NoteKind Kind
+    {
+        get => _kind;
+        set
+        {
+            if (_kind == value) return;
+            _kind = value;
+            Raise(nameof(Kind));
+            Raise(nameof(IsPrompt));
+            Raise(nameof(DisplayTitle));
+            Raise(nameof(AccessibleLabel));
+        }
+    }
+
+    /// <summary>
+    /// How many prompts the set holds and how many have gone. Mirrored into the index for the same
+    /// reason <see cref="PlainText"/> is: the list row must render without opening the prompt file.
+    /// </summary>
+    public int PromptTotal
+    {
+        get => _promptTotal;
+        set
+        {
+            if (_promptTotal == value) return;
+            _promptTotal = value;
+            Raise(nameof(PromptTotal));
+            Raise(nameof(PromptCountLabel));
+            Raise(nameof(AccessibleLabel));
+        }
+    }
+
+    public int PromptSent
+    {
+        get => _promptSent;
+        set
+        {
+            if (_promptSent == value) return;
+            _promptSent = value;
+            Raise(nameof(PromptSent));
+            Raise(nameof(PromptCountLabel));
+            Raise(nameof(AccessibleLabel));
+        }
+    }
+
+    /// <summary>
     /// Set when the body contains pictures. Without it a note holding nothing but an image would
     /// look blank to <see cref="IsEmpty"/> and get discarded on the way out.
     /// </summary>
@@ -112,11 +168,27 @@ public sealed class Note : INotifyPropertyChanged
 
     /// <summary>What the list shows: the title, or a placeholder while it is still blank.</summary>
     [JsonIgnore]
-    public string DisplayTitle => string.IsNullOrWhiteSpace(Title) ? UntitledLabel : Title.Trim();
+    public string DisplayTitle => string.IsNullOrWhiteSpace(Title)
+        ? (IsPrompt ? UntitledPromptLabel : UntitledLabel)
+        : Title.Trim();
 
     [JsonIgnore] public string Preview => DerivePreview(PlainText);
     [JsonIgnore] public string EditedOnLabel => FormatEditorTimestamp(ModifiedAt);
     [JsonIgnore] public bool IsDeleted => _deletedAt != null;
+    [JsonIgnore] public bool IsPrompt => _kind == NoteKind.Prompt;
+
+    /// <summary>Progress through the queue, shown on the row beside the timestamp.</summary>
+    [JsonIgnore] public string PromptCountLabel => $"{_promptSent}/{_promptTotal} sent";
+
+    /// <summary>
+    /// What a screen reader announces for the row. The row's template has no ContentPresenter, so
+    /// nothing inside it reaches the automation tree — the P badge and the count included, which is
+    /// why they are spelled out here rather than left to be read off the row.
+    /// </summary>
+    [JsonIgnore]
+    public string AccessibleLabel => IsPrompt
+        ? $"{DisplayTitle}, prompt set, {_promptSent} of {_promptTotal} sent"
+        : DisplayTitle;
 
     [JsonIgnore]
     public bool IsEmpty =>
