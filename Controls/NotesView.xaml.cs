@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.ComponentModel;
 using System.IO;
 using System.Linq;
+using System.Runtime.InteropServices;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Data;
@@ -14,6 +15,10 @@ using System.Windows.Media.Imaging;
 using System.Windows.Threading;
 using CaffeineWin.Notes;
 using Microsoft.Win32;
+
+// System.IO.Path is already in scope here, so the shapes come in by alias rather than by namespace.
+using Ellipse = System.Windows.Shapes.Ellipse;
+using ShapePath = System.Windows.Shapes.Path;
 
 namespace CaffeineWin.Controls;
 
@@ -46,6 +51,7 @@ public partial class NotesView : UserControl
 
     private static readonly IEasingFunction SoftEase = new QuadraticEase { EasingMode = EasingMode.EaseInOut };
     private static readonly IEasingFunction OutEase = new CubicEase { EasingMode = EasingMode.EaseOut };
+    private static readonly FontFamily UiFont = new("Segoe UI");
 
     private readonly NotesStore _store = new();
     private readonly CollectionViewSource _view = new();
@@ -71,6 +77,9 @@ public partial class NotesView : UserControl
         _saveTimer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(600) };
         _saveTimer.Tick += SaveTimer_Tick;
 
+        _promptUndoTimer = new DispatcherTimer { Interval = PromptUndoWindow };
+        _promptUndoTimer.Tick += (_, _) => DismissPromptUndo();
+
         _store.Load();
 
         // Pasting an image is a paste like any other as far as the caret is concerned, so intercept
@@ -92,6 +101,13 @@ public partial class NotesView : UserControl
         NotesList.LayoutUpdated += (_, _) =>
         {
             if (!_indicatorAnimating) MoveRowIndicator(animate: false);
+        };
+
+        // Prompt cards are built in code, so their brushes are resolved once and a dictionary swap
+        // never reaches them the way DynamicResource does. Rebuild so a theme change lands on them.
+        ThemeManager.ThemeChanged += () =>
+        {
+            if (_activeNote is { IsPrompt: true }) RebuildPrompts();
         };
 
         // Fires again every time the view is reparented between hosts, so only run once.
@@ -145,6 +161,14 @@ public partial class NotesView : UserControl
             return true;
         }
 
+        // P, not N: Ctrl+Shift+N is WPF's own ToggleNumbering, which the editor consumes before this
+        // ever runs — the shortcut would silently number a paragraph instead of making a note.
+        if (Keyboard.Modifiers == (ModifierKeys.Control | ModifierKeys.Shift) && e.Key == Key.P)
+        {
+            CreatePromptNote();
+            return true;
+        }
+
         var ctrl = Keyboard.Modifiers == ModifierKeys.Control;
 
         if (ctrl && e.Key == Key.N)
@@ -173,7 +197,7 @@ public partial class NotesView : UserControl
         }
 
         // Never close out from under someone mid-sentence.
-        return e.Key == Key.Escape && Editor.IsKeyboardFocusWithin;
+        return e.Key == Key.Escape && (Editor.IsKeyboardFocusWithin || PromptSurface.IsKeyboardFocusWithin);
     }
 
     /// <summary>Plays the arrival animation. Hosts call this when the view becomes visible.</summary>
@@ -369,6 +393,11 @@ public partial class NotesView : UserControl
 
     private void SyncActiveNoteToSelection()
     {
+        // This changes the active note, so it has to commit the outgoing one first: a refresh can
+        // drop the selection mid-debounce — search for text the open note doesn't match — and
+        // LoadActiveNote would then clear the dirty flags with the write still pending.
+        CommitEditor();
+
         _activeNote = NotesList.SelectedItem as Note;
         LoadActiveNote();
     }
@@ -379,15 +408,24 @@ public partial class NotesView : UserControl
         if (_activeNote == null) return;
 
         var leaving = _activeNote;
+        PruneBlankPrompts();
         CommitEditor();
         _activeNote = null;
 
+        // A prompt set we could not read looks empty because the load failed, not because it is —
+        // discarding on that would delete a note over a transient file lock.
+        var unreadable = leaving.IsPrompt && _promptsReadOnly;
+
         // Only discard blanks from the live list — a deleted note is a record to restore, not a draft.
-        if (leaving.IsEmpty && !leaving.IsDeleted)
+        if (leaving.IsEmpty && !leaving.IsDeleted && !unreadable)
         {
             _suppressSelectionChange = true;
             _store.Notes.Remove(leaving);
             _suppressSelectionChange = false;
+
+            // The debounce may already have written a file for prompts typed and then cleared.
+            if (leaving.IsPrompt) _store.DeletePrompts(leaving.Id);
+
             UpdateGrouping();
         }
 
@@ -396,12 +434,16 @@ public partial class NotesView : UserControl
 
     private void LoadActiveNote()
     {
+        // Undo belongs to the prompt set it was raised from, so it cannot survive a note switch.
+        DismissPromptUndo();
+
         _suppressEditorChange = true;
         TitleBox.Text = _activeNote?.Title ?? "";
         LoadBodyDocument(_activeNote);
         _suppressEditorChange = false;
         _bodyDirty = false;
 
+        SyncEditorMode();
         SyncFormatBar();
         UpdateEditorHeader();
         UpdateEmptyState();
@@ -460,7 +502,7 @@ public partial class NotesView : UserControl
         if (_activeNote == null) return;
 
         _activeNote.ModifiedAt = DateTime.Now;
-        WriteBody(_activeNote);
+        WriteActiveBody(_activeNote);
         UpdateEditorHeader();
         Save();
     }
@@ -473,11 +515,23 @@ public partial class NotesView : UserControl
         if (_activeNote == null) return;
 
         _activeNote.Title = TitleBox.Text;
-        _activeNote.PlainText = ReadPlainText();
-        WriteBody(_activeNote);
+
+        // A prompt set we could not read leaves _prompts empty, and mirroring that into the index
+        // would erase the record of what is actually in the file.
+        if (!_activeNote.IsPrompt) _activeNote.PlainText = ReadPlainText();
+        else if (!_promptsReadOnly) _activeNote.PlainText = ReadPromptText();
+
+        WriteActiveBody(_activeNote);
 
         if (pending)
             _activeNote.ModifiedAt = DateTime.Now;
+    }
+
+    /// <summary>Writes whichever kind of body the note has — a formatted document or a prompt set.</summary>
+    private void WriteActiveBody(Note note)
+    {
+        if (note.IsPrompt) WritePrompts(note);
+        else WriteBody(note);
     }
 
     // ===== The formatted body =====
@@ -487,7 +541,8 @@ public partial class NotesView : UserControl
         var document = new FlowDocument { FontFamily = Editor.FontFamily, FontSize = BodyFontSize };
         Editor.Document = document;
 
-        if (note == null) return;
+        // A prompt note has no document at all; its body is the queue.
+        if (note == null || note.IsPrompt) return;
 
         var opened = _store.LoadBody(note.Id, stream =>
             new TextRange(document.ContentStart, document.ContentEnd).Load(stream, DataFormats.XamlPackage));
@@ -621,6 +676,43 @@ public partial class NotesView : UserControl
         Save();
     }
 
+    private void NewPrompt_Click(object sender, RoutedEventArgs e) => CreatePromptNote();
+
+    /// <summary>
+    /// The same act as <see cref="CreateNote"/>, but the note it makes holds a queue of prompts
+    /// rather than a document. Reachable by Ctrl+Shift+P even though the button is hidden in the bin.
+    /// </summary>
+    private void CreatePromptNote()
+    {
+        if (_showingBin) return;
+
+        LeaveActiveNote();
+
+        // A blank note matches no search, so a filtered list would swallow it.
+        if (SearchBox.Text.Length > 0)
+            SearchBox.Text = "";
+
+        var note = new Note { Kind = NoteKind.Prompt };
+        _store.Notes.Add(note);
+        UpdateGrouping();
+
+        _suppressSelectionChange = true;
+        NotesList.SelectedItem = note;
+        _suppressSelectionChange = false;
+
+        _activeNote = note;
+        LoadActiveNote();
+
+        // An empty queue has nothing to type into, so it opens with one card waiting.
+        AddPrompt(focus: false);
+
+        NotesList.ScrollIntoView(note);
+
+        // The title is the application name, and naming it is the first thing you do.
+        TitleBox.Focus();
+        Save();
+    }
+
     private void TogglePin_Click(object sender, RoutedEventArgs e)
     {
         if (_showingBin) return;
@@ -642,14 +734,25 @@ public partial class NotesView : UserControl
 
         var copy = new Note
         {
+            Kind = note.Kind,
             Title = note.Title,
             PlainText = note.PlainText,
-            HasImages = note.HasImages
+            HasImages = note.HasImages,
+            PromptTotal = note.PromptTotal,
+            PromptSent = note.PromptSent
         };
 
-        // The formatted body is a file, so copy it rather than the reference.
-        _store.LoadBody(note.Id, source =>
-            _store.SaveBody(copy.Id, destination => source.CopyTo(destination)));
+        // The body is a file, so copy it rather than the reference.
+        if (note.IsPrompt)
+        {
+            var prompts = _store.LoadPrompts(note.Id);
+            if (prompts != null) _store.SavePrompts(copy.Id, prompts);
+        }
+        else
+        {
+            _store.LoadBody(note.Id, source =>
+                _store.SaveBody(copy.Id, destination => source.CopyTo(destination)));
+        }
 
         _store.Notes.Add(copy);
 
@@ -750,6 +853,7 @@ public partial class NotesView : UserControl
         var binned = _store.Notes.Count(n => n.IsDeleted);
 
         NewNoteButton.Visibility = _showingBin ? Visibility.Collapsed : Visibility.Visible;
+        NewPromptButton.Visibility = _showingBin ? Visibility.Collapsed : Visibility.Visible;
         PinButton.Visibility = _showingBin ? Visibility.Collapsed : Visibility.Visible;
         RestoreButton.Visibility = _showingBin ? Visibility.Visible : Visibility.Collapsed;
 
@@ -814,6 +918,7 @@ public partial class NotesView : UserControl
 
         // The index entry is gone; take its body file with it.
         _store.DeleteBody(note.Id);
+        _store.DeletePrompts(note.Id);
 
         UpdateGrouping();
         SelectFirstAvailable();
@@ -1067,6 +1172,13 @@ public partial class NotesView : UserControl
 
     private void RestoreFormatBar()
     {
+        // A prompt note has no document to format, so the bar stays folded whatever is stored.
+        if (_activeNote?.IsPrompt == true)
+        {
+            ShowFormatBar(false, animate: false);
+            return;
+        }
+
         using var key = Registry.CurrentUser.OpenSubKey(SettingsPath, false);
         ShowFormatBar(key?.GetValue(FormatBarKey) is int stored && stored == 1, animate: false);
     }
@@ -1324,6 +1436,742 @@ public partial class NotesView : UserControl
         return bitmap;
     }
 
+    // ===== Prompt sets =====
+    //
+    // A prompt note's body is a queue rather than a document: prompts waiting to go, then prompts
+    // already sent. The list carries its own order — position in the JSON array is position on
+    // screen — so sending a prompt is a move to the end of the list and taking one back is a move
+    // to the end of the unsent block. There is no order field to keep in step with anything.
+
+    private static readonly TimeSpan PromptUndoWindow = TimeSpan.FromSeconds(6);
+    private static readonly TimeSpan CopiedFlash = TimeSpan.FromMilliseconds(1200);
+
+    private const string CopyGlyph = "M4.5,4.5 H12.5 V12.5 H4.5 Z M9.5,4.5 V1.5 H1.5 V9.5 H4.5";
+    private const string CopiedGlyph = "M2,7.5 L5.5,11 L12,3.5";
+    private const string PromptBinGlyph = "M1.5,3.5 H12.5 M5,3.5 V1.5 H9 V3.5 M3,3.5 V12.5 H11 V3.5 M5.8,6 V10 M8.2,6 V10";
+    private const string GripGlyph = "M1.5,1 V11 M5.5,1 V11";
+
+    private readonly List<Prompt> _prompts = new();
+    private readonly DispatcherTimer _promptUndoTimer;
+
+    private bool _promptsDirty;
+
+    /// <summary>Set when the prompt file exists but could not be read — never write over it.</summary>
+    private bool _promptsReadOnly;
+
+    /// <summary>The prompt whose card should take focus and animate in once the rebuild lands.</summary>
+    private Prompt? _focusPrompt;
+
+    private Prompt? _undoPrompt;
+    private int _undoIndex;
+
+    private Point _promptDragStart;
+    private Prompt? _promptDragItem;
+    private bool _promptDragging;
+
+    /// <summary>
+    /// Puts the editor into document mode or prompt mode. A prompt note has nothing to format and
+    /// no body file, so the formatting bar folds away and takes its toggle with it.
+    /// </summary>
+    private void SyncEditorMode()
+    {
+        var prompt = _activeNote?.IsPrompt == true;
+
+        PromptSurface.Visibility = prompt ? Visibility.Visible : Visibility.Collapsed;
+        Editor.Visibility = prompt ? Visibility.Collapsed : Visibility.Visible;
+        FormatToggle.Visibility = prompt ? Visibility.Collapsed : Visibility.Visible;
+        TitlePlaceholder.Text = prompt ? "Application name" : "Title";
+
+        // Folding the bar to zero height leaves its buttons in the tab order and the automation
+        // tree, where they would target a document this note does not have. Collapse it outright.
+        FormatBarHost.Visibility = prompt ? Visibility.Collapsed : Visibility.Visible;
+
+        RestoreFormatBar();
+
+        if (prompt)
+        {
+            LoadPromptSet(_activeNote!);
+            return;
+        }
+
+        _prompts.Clear();
+        _promptsReadOnly = false;
+        _promptsDirty = false;
+        PromptStack.Children.Clear();
+    }
+
+    private void LoadPromptSet(Note note)
+    {
+        var loaded = _store.LoadPrompts(note.Id);
+        _promptsReadOnly = loaded == null;
+
+        _prompts.Clear();
+        if (loaded != null) _prompts.AddRange(loaded);
+
+        NormalisePrompts();
+        _promptsDirty = false;
+
+        RebuildPrompts();
+        ReportStoreError();
+    }
+
+    /// <summary>
+    /// Sent prompts always follow the unsent ones, oldest sent first. The file is the order, so an
+    /// older or hand-edited one gets straightened out on the way in rather than at every read.
+    /// </summary>
+    private void NormalisePrompts()
+    {
+        var ordered = _prompts.Where(p => !p.Sent)
+            .Concat(_prompts.Where(p => p.Sent).OrderBy(p => p.SentAt ?? DateTime.MinValue))
+            .ToList();
+
+        _prompts.Clear();
+        _prompts.AddRange(ordered);
+    }
+
+    /// <summary>
+    /// The only thing that puts a prompt on screen. Structural changes only — typing writes straight
+    /// through to the model, because rebuilding mid-keystroke would take the caret with it.
+    /// </summary>
+    private void RebuildPrompts()
+    {
+        PromptStack.Children.Clear();
+        if (_activeNote is not { IsPrompt: true }) return;
+
+        var unsent = _prompts.Where(p => !p.Sent).ToList();
+        var sent = _prompts.Where(p => p.Sent).ToList();
+
+        // The row reads these, so they settle here rather than waiting for the debounce — and the
+        // mirror settles with them, or a deleted prompt would still turn up in search until the
+        // next keystroke. Skipped for a set we could not read, whose queue is empty by accident.
+        if (!_promptsReadOnly)
+        {
+            _activeNote.PromptTotal = _prompts.Count;
+            _activeNote.PromptSent = sent.Count;
+            _activeNote.PlainText = ReadPromptText();
+        }
+
+        PromptStack.Children.Add(BuildPromptHeader($"PROMPTS TO SEND ({unsent.Count})", first: true));
+
+        for (var i = 0; i < unsent.Count; i++)
+            PromptStack.Children.Add(BuildPromptCard(unsent[i], i + 1));
+
+        if (unsent.Count == 0)
+            PromptStack.Children.Add(BuildPromptNote(sent.Count > 0 ? "Nothing left to send." : "No prompts yet."));
+
+        if (!_showingBin && !_promptsReadOnly)
+            PromptStack.Children.Add(BuildAddPromptRow());
+
+        if (sent.Count == 0) return;
+
+        PromptStack.Children.Add(BuildPromptHeader($"SENT ({sent.Count})", first: false));
+
+        for (var i = 0; i < sent.Count; i++)
+            PromptStack.Children.Add(BuildPromptCard(sent[i], i + 1));
+    }
+
+    private TextBlock BuildPromptHeader(string text, bool first) => new()
+    {
+        Text = text,
+        FontFamily = UiFont,
+        FontSize = 11,
+        FontWeight = FontWeights.SemiBold,
+        Foreground = (Brush)FindResource("SecondaryText"),
+        Margin = new Thickness(4, first ? 8 : 18, 0, 8)
+    };
+
+    private TextBlock BuildPromptNote(string text) => new()
+    {
+        Text = text,
+        FontFamily = UiFont,
+        FontSize = 12,
+        Foreground = (Brush)FindResource("SecondaryText"),
+        Margin = new Thickness(4, 2, 0, 6)
+    };
+
+    // ===== One prompt card =====
+
+    private Border BuildPromptCard(Prompt prompt, int serial)
+    {
+        var editable = !_showingBin && !_promptsReadOnly;
+
+        // grip · tick · number · text · copy · delete
+        var grid = new Grid();
+        grid.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+        grid.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+        grid.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+        grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+        grid.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+        grid.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+
+        var grip = BuildPromptGrip();
+        // Hidden rather than collapsed: the text has to start at the same place in both sections.
+        grip.Visibility = !prompt.Sent && editable ? Visibility.Visible : Visibility.Hidden;
+
+        var tick = BuildPromptTick(prompt, editable);
+
+        var number = new TextBlock
+        {
+            Text = $"{serial}.",
+            FontFamily = UiFont,
+            FontSize = 11.5,
+            FontWeight = FontWeights.SemiBold,
+            Foreground = (Brush)FindResource("SecondaryText"),
+            MinWidth = 20,
+            TextAlignment = TextAlignment.Right,
+            Margin = new Thickness(2, 5, 8, 0),
+            VerticalAlignment = VerticalAlignment.Top
+        };
+
+        var body = BuildPromptBody(prompt, editable);
+
+        var copyGlyph = new ShapePath
+        {
+            Data = Geometry.Parse(CopyGlyph),
+            Stroke = (Brush)FindResource("PowerIconStroke"),
+            StrokeThickness = 1.2,
+            StrokeStartLineCap = PenLineCap.Round,
+            StrokeEndLineCap = PenLineCap.Round,
+            StrokeLineJoin = PenLineJoin.Round
+        };
+
+        var copy = new Button
+        {
+            Style = (Style)FindResource("PromptCardButtonStyle"),
+            Content = copyGlyph,
+            ToolTip = "Copy to clipboard"
+        };
+        copy.Click += (_, _) => CopyPrompt(prompt, copyGlyph);
+
+        var delete = new Button
+        {
+            Style = (Style)FindResource("PromptCardButtonStyle"),
+            ToolTip = "Delete prompt",
+            Visibility = editable ? Visibility.Visible : Visibility.Collapsed,
+            Content = new ShapePath
+            {
+                Data = Geometry.Parse(PromptBinGlyph),
+                Stroke = (Brush)FindResource("PowerIconStroke"),
+                StrokeThickness = 1.2,
+                StrokeStartLineCap = PenLineCap.Round,
+                StrokeEndLineCap = PenLineCap.Round
+            }
+        };
+        delete.Click += (_, _) => DeletePrompt(prompt);
+
+        Grid.SetColumn(grip, 0);
+        Grid.SetColumn(tick, 1);
+        Grid.SetColumn(number, 2);
+        Grid.SetColumn(body.Host, 3);
+        Grid.SetColumn(copy, 4);
+        Grid.SetColumn(delete, 5);
+
+        grid.Children.Add(grip);
+        grid.Children.Add(tick);
+        grid.Children.Add(number);
+        grid.Children.Add(body.Host);
+        grid.Children.Add(copy);
+        grid.Children.Add(delete);
+
+        var card = new Border
+        {
+            Background = (Brush)FindResource("SurfaceColor"),
+            CornerRadius = new CornerRadius(12),
+            Padding = new Thickness(8, 8, 8, 8),
+            Margin = new Thickness(0, 0, 0, 8),
+            Tag = prompt,
+            Child = grid
+        };
+
+        if (!prompt.Sent && editable) AttachPromptDrag(card, grip, prompt);
+
+        // Only the card you just added arrives with motion; rebuilding the whole queue on every
+        // tick would otherwise flicker the lot.
+        if (ReferenceEquals(prompt, _focusPrompt))
+        {
+            _focusPrompt = null;
+            AnimatePromptCardIn(card);
+
+            Dispatcher.BeginInvoke(() =>
+            {
+                body.Box.Focus();
+                card.BringIntoView();
+            }, DispatcherPriority.Loaded);
+        }
+
+        return card;
+    }
+
+    /// <summary>The editable prompt text, its watermark, and the stamp a sent prompt carries.</summary>
+    private (Panel Host, TextBox Box) BuildPromptBody(Prompt prompt, bool editable)
+    {
+        var placeholder = new TextBlock
+        {
+            Text = "Type or paste a prompt…",
+            FontFamily = UiFont,
+            FontSize = 13,
+            Foreground = (Brush)FindResource("SecondaryText"),
+            Opacity = 0.75,
+            VerticalAlignment = VerticalAlignment.Top,
+            IsHitTestVisible = false,
+            Visibility = prompt.IsEmpty ? Visibility.Visible : Visibility.Collapsed
+        };
+
+        var box = new TextBox
+        {
+            Text = prompt.Text,
+            AcceptsReturn = true,
+            TextWrapping = TextWrapping.Wrap,
+            FontFamily = UiFont,
+            FontSize = 13,
+            // A sent prompt is a record, so it recedes — but it stays readable and copyable.
+            Foreground = (Brush)FindResource(prompt.Sent ? "SecondaryText" : "PrimaryText"),
+            CaretBrush = (Brush)FindResource("PrimaryText"),
+            SelectionBrush = (Brush)FindResource("NotesAccent"),
+            Background = Brushes.Transparent,
+            BorderThickness = new Thickness(0),
+            Padding = new Thickness(0),
+            IsReadOnly = !editable,
+            VerticalAlignment = VerticalAlignment.Center
+        };
+
+        box.TextChanged += (_, _) =>
+        {
+            placeholder.Visibility = box.Text.Length == 0 ? Visibility.Visible : Visibility.Collapsed;
+
+            if (_activeNote is not { IsPrompt: true }) return;
+
+            // Straight through, so the row's preview tracks your typing the way a note's does.
+            prompt.Text = box.Text;
+            _activeNote.PlainText = ReadPromptText();
+            MarkPromptsDirty();
+        };
+
+        var text = new Grid { Children = { placeholder, box } };
+
+        var host = new StackPanel
+        {
+            VerticalAlignment = VerticalAlignment.Center,
+            Margin = new Thickness(0, 3, 6, 1),
+            Children = { text }
+        };
+
+        if (prompt is { Sent: true, SentAt: not null })
+            host.Children.Add(new TextBlock
+            {
+                Text = Prompt.FormatSentAt(prompt.SentAt.Value, DateTime.Now),
+                FontFamily = UiFont,
+                FontSize = 10.5,
+                Foreground = (Brush)FindResource("SecondaryText"),
+                Opacity = 0.85,
+                Margin = new Thickness(0, 5, 0, 0)
+            });
+
+        return (host, box);
+    }
+
+    /// <summary>The tick that moves a prompt between the two sections. Amber, because Notes is amber.</summary>
+    private Border BuildPromptTick(Prompt prompt, bool editable)
+    {
+        var accent = (Brush)FindResource("NotesAccent");
+
+        var ring = new Ellipse
+        {
+            Width = 18,
+            Height = 18,
+            Stroke = prompt.Sent ? accent : (Brush)FindResource("SecondaryText"),
+            StrokeThickness = 1.4,
+            Fill = prompt.Sent ? accent : Brushes.Transparent
+        };
+
+        var check = new ShapePath
+        {
+            Data = Geometry.Parse("M1,4.5 L3.9,7.4 L9.5,1.6"),
+            Stroke = (Brush)FindResource("NotesSelectionText"),
+            StrokeThickness = 1.7,
+            StrokeStartLineCap = PenLineCap.Round,
+            StrokeEndLineCap = PenLineCap.Round,
+            StrokeLineJoin = PenLineJoin.Round,
+            Width = 11,
+            Height = 9,
+            HorizontalAlignment = HorizontalAlignment.Center,
+            VerticalAlignment = VerticalAlignment.Center,
+            Visibility = prompt.Sent ? Visibility.Visible : Visibility.Collapsed
+        };
+
+        var tick = new Border
+        {
+            Background = Brushes.Transparent,
+            Padding = new Thickness(3),
+            VerticalAlignment = VerticalAlignment.Top,
+            Margin = new Thickness(0, 2, 0, 0),
+            Cursor = editable ? Cursors.Hand : Cursors.Arrow,
+            RenderTransformOrigin = new Point(0.5, 0.5),
+            RenderTransform = new ScaleTransform(1, 1),
+            ToolTip = prompt.Sent ? "Put back in the queue" : "Mark as sent",
+            Child = new Grid { Width = 18, Height = 18, Children = { ring, check } }
+        };
+
+        if (!editable) return tick;
+
+        tick.MouseLeftButtonUp += (_, e) =>
+        {
+            e.Handled = true;
+
+            var scale = (ScaleTransform)tick.RenderTransform;
+            var pop = new DoubleAnimation(0.8, 1, new Duration(TimeSpan.FromMilliseconds(260))) { EasingFunction = OutEase };
+            scale.BeginAnimation(ScaleTransform.ScaleXProperty, pop.Clone());
+            scale.BeginAnimation(ScaleTransform.ScaleYProperty, pop);
+
+            SetPromptSent(prompt, !prompt.Sent);
+        };
+
+        return tick;
+    }
+
+    /// <summary>
+    /// The drag handle. A bare Path is hit-tested against its stroke, which would make a 1.3px line
+    /// the whole target — so it sits inside a transparent Border that is grabbable across its area.
+    /// </summary>
+    private Border BuildPromptGrip() => new()
+    {
+        Background = Brushes.Transparent,
+        Padding = new Thickness(4, 6, 5, 6),
+        VerticalAlignment = VerticalAlignment.Top,
+        Cursor = Cursors.SizeNS,
+        ToolTip = "Drag to reorder",
+        Child = new ShapePath
+        {
+            Data = Geometry.Parse(GripGlyph),
+            Stroke = (Brush)FindResource("SecondaryText"),
+            StrokeThickness = 1.3,
+            StrokeStartLineCap = PenLineCap.Round,
+            StrokeEndLineCap = PenLineCap.Round,
+            Opacity = 0.45,
+            Width = 7,
+            Height = 12
+        }
+    };
+
+    private Button BuildAddPromptRow()
+    {
+        // Its text starts at 9px in, which lines the "+" up with the grips on the cards above it.
+        var button = new Button
+        {
+            Style = (Style)FindResource("PromptQuietButtonStyle"),
+            Content = "+   Add prompt",
+            HorizontalAlignment = HorizontalAlignment.Left,
+            Margin = new Thickness(0, 2, 0, 0)
+        };
+
+        button.Click += (_, _) => AddPrompt(focus: true);
+        return button;
+    }
+
+    // ===== Prompt commands =====
+
+    private void AddPrompt(bool focus)
+    {
+        if (_activeNote is not { IsPrompt: true } || _showingBin || _promptsReadOnly) return;
+
+        var prompt = new Prompt();
+
+        // Onto the end of the queue, which is where the sent ones start.
+        _prompts.Insert(_prompts.Count(p => !p.Sent), prompt);
+
+        if (focus) _focusPrompt = prompt;
+
+        MarkPromptsDirty();
+        RebuildPrompts();
+    }
+
+    private void SetPromptSent(Prompt prompt, bool sent)
+    {
+        if (_showingBin || _promptsReadOnly) return;
+
+        prompt.Sent = sent;
+        prompt.SentAt = sent ? DateTime.Now : null;
+
+        _prompts.Remove(prompt);
+
+        // Sending is a move to the very end, so Sent reads oldest first; taking one back drops it
+        // at the bottom of the queue rather than jumping it to the front.
+        if (sent) _prompts.Add(prompt);
+        else _prompts.Insert(_prompts.Count(p => !p.Sent), prompt);
+
+        MarkPromptsDirty();
+        RebuildPrompts();
+    }
+
+    private void CopyPrompt(Prompt prompt, ShapePath glyph)
+    {
+        if (prompt.IsEmpty) return;
+
+        try
+        {
+            Clipboard.SetText(prompt.Text);
+        }
+        catch (ExternalException ex)
+        {
+            // Another application can hold the clipboard open — say so rather than doing nothing.
+            ShowError($"Couldn't copy to the clipboard — {ex.Message}");
+            return;
+        }
+
+        FlashCopied(glyph);
+    }
+
+    /// <summary>Turns the copy icon into a tick for a moment, so the click has an answer.</summary>
+    private void FlashCopied(ShapePath glyph)
+    {
+        glyph.Data = Geometry.Parse(CopiedGlyph);
+        glyph.Stroke = (Brush)FindResource("NotesAccent");
+
+        var revert = new DispatcherTimer { Interval = CopiedFlash };
+        revert.Tick += (_, _) =>
+        {
+            revert.Stop();
+            glyph.Data = Geometry.Parse(CopyGlyph);
+            glyph.Stroke = (Brush)FindResource("PowerIconStroke");
+        };
+        revert.Start();
+    }
+
+    private void DeletePrompt(Prompt prompt)
+    {
+        var index = _prompts.IndexOf(prompt);
+        if (index < 0) return;
+
+        // One deletion is undoable at a time; a second one simply forgets the first.
+        _undoPrompt = prompt;
+        _undoIndex = index;
+
+        _prompts.RemoveAt(index);
+
+        MarkPromptsDirty();
+        RebuildPrompts();
+        ShowPromptUndo();
+    }
+
+    /// <summary>
+    /// A prompt card you opened and never typed into is a draft, not content — it goes on the way
+    /// out, the same way a blank note evaporates.
+    /// </summary>
+    private void PruneBlankPrompts()
+    {
+        // Nothing in the bin is editable, so nothing there is a draft to tidy away either.
+        if (_activeNote is not { IsPrompt: true } || _promptsReadOnly || _showingBin) return;
+
+        if (_prompts.RemoveAll(p => !p.Sent && p.IsEmpty) > 0)
+            _promptsDirty = true;
+    }
+
+    private string ReadPromptText() =>
+        string.Join("\n", _prompts.Where(p => !p.IsEmpty).Select(p => p.Text.Trim()));
+
+    private void MarkPromptsDirty()
+    {
+        if (_activeNote is not { IsPrompt: true } || _promptsReadOnly) return;
+
+        _promptsDirty = true;
+        _saveTimer.Stop();
+        _saveTimer.Start();
+    }
+
+    private void WritePrompts(Note note)
+    {
+        if (!_promptsDirty) return;
+        _promptsDirty = false;
+
+        // Unreadable: writing now would destroy whatever is in the file. In the bin: the note is a
+        // record to restore, and nothing may rewrite a record.
+        if (_promptsReadOnly || _showingBin) return;
+
+        note.PromptTotal = _prompts.Count;
+        note.PromptSent = _prompts.Count(p => p.Sent);
+
+        _store.SavePrompts(note.Id, _prompts);
+        ReportStoreError();
+    }
+
+    // ===== Undo =====
+
+    private void ShowPromptUndo()
+    {
+        PromptUndoToast.Visibility = Visibility.Visible;
+        PromptUndoToast.BeginAnimation(OpacityProperty,
+            new DoubleAnimation(0, 1, new Duration(TimeSpan.FromMilliseconds(180))) { EasingFunction = SoftEase });
+
+        _promptUndoTimer.Stop();
+        _promptUndoTimer.Start();
+    }
+
+    private void PromptUndo_Click(object sender, RoutedEventArgs e)
+    {
+        _promptUndoTimer.Stop();
+
+        var restored = _undoPrompt;
+        _undoPrompt = null;
+
+        if (restored != null && _activeNote is { IsPrompt: true })
+        {
+            _prompts.Insert(Math.Min(_undoIndex, _prompts.Count), restored);
+            NormalisePrompts();
+            MarkPromptsDirty();
+            RebuildPrompts();
+        }
+
+        HidePromptUndo();
+    }
+
+    private void DismissPromptUndo()
+    {
+        _promptUndoTimer.Stop();
+
+        if (_undoPrompt == null && PromptUndoToast.Visibility != Visibility.Visible) return;
+
+        _undoPrompt = null;
+        HidePromptUndo();
+    }
+
+    private void HidePromptUndo()
+    {
+        var fade = new DoubleAnimation(1, 0, new Duration(TimeSpan.FromMilliseconds(180))) { EasingFunction = SoftEase };
+
+        // Re-check: a fast delete-after-undo must not collapse a freshly shown toast.
+        fade.Completed += (_, _) =>
+        {
+            if (_undoPrompt == null) PromptUndoToast.Visibility = Visibility.Collapsed;
+        };
+
+        PromptUndoToast.BeginAnimation(OpacityProperty, fade);
+    }
+
+    // ===== Reordering =====
+    //
+    // The grip is the handle, not the whole card: the card's middle is an editable text box, and
+    // dragging there has to mean selecting text.
+
+    private void AttachPromptDrag(Border card, UIElement grip, Prompt prompt)
+    {
+        grip.PreviewMouseLeftButtonDown += (_, e) =>
+        {
+            _promptDragStart = e.GetPosition(PromptScroll);
+            _promptDragItem = prompt;
+            _promptDragging = false;
+            e.Handled = true;
+        };
+
+        grip.PreviewMouseMove += (_, e) =>
+        {
+            if (_promptDragItem == null || e.LeftButton != MouseButtonState.Pressed) return;
+            if (!ReferenceEquals(_promptDragItem, prompt)) return;
+
+            var now = e.GetPosition(PromptScroll);
+
+            if (!_promptDragging)
+            {
+                if (Math.Abs(now.Y - _promptDragStart.Y) < SystemParameters.MinimumVerticalDragDistance) return;
+
+                _promptDragging = true;
+                grip.CaptureMouse();
+
+                // The arrival fade may still be running on this very card.
+                card.BeginAnimation(OpacityProperty, null);
+                card.Opacity = 0.75;
+                Panel.SetZIndex(card, 5);
+            }
+
+            MovePromptDuringDrag(card, now);
+            e.Handled = true;
+        };
+
+        grip.PreviewMouseLeftButtonUp += (_, e) =>
+        {
+            if (grip.IsMouseCaptured) grip.ReleaseMouseCapture();
+
+            if (_promptDragging)
+            {
+                _promptDragging = false;
+                card.Opacity = 1;
+                Panel.SetZIndex(card, 0);
+                CommitPromptOrder();
+                e.Handled = true;
+
+                // Releasing capture mid-route and rebuilding the tree in the same handler is the
+                // trap CloseDuePopup documents — renumber once the event has finished delivering.
+                Dispatcher.BeginInvoke(RebuildPrompts, DispatcherPriority.Input);
+            }
+
+            _promptDragItem = null;
+        };
+    }
+
+    /// <summary>Moves the dragged card within the stack as the pointer crosses its neighbours.</summary>
+    private void MovePromptDuringDrag(Border card, Point pointer)
+    {
+        var siblings = PromptStack.Children.OfType<Border>()
+            .Where(b => b.Tag is Prompt { Sent: false })
+            .ToList();
+
+        var index = siblings.IndexOf(card);
+        if (index < 0) return;
+
+        for (var i = 0; i < siblings.Count; i++)
+        {
+            if (i == index) continue;
+
+            var other = siblings[i];
+            var mid = other.TranslatePoint(new Point(0, 0), PromptScroll).Y + other.ActualHeight / 2;
+
+            var crossed = i < index ? pointer.Y < mid : pointer.Y > mid;
+            if (!crossed) continue;
+
+            PromptStack.Children.Remove(card);
+            PromptStack.Children.Insert(PromptStack.Children.IndexOf(other) + (i < index ? 0 : 1), card);
+            return;
+        }
+    }
+
+    /// <summary>Takes the order back off the screen, which is where the drag actually happened.</summary>
+    private void CommitPromptOrder()
+    {
+        var ordered = PromptStack.Children.OfType<Border>()
+            .Select(b => b.Tag)
+            .OfType<Prompt>()
+            .Where(p => !p.Sent)
+            .ToList();
+
+        if (ordered.Count == 0) return;
+
+        var sent = _prompts.Where(p => p.Sent).ToList();
+
+        _prompts.Clear();
+        _prompts.AddRange(ordered);
+        _prompts.AddRange(sent);
+
+        MarkPromptsDirty();
+    }
+
+    private void AnimatePromptCardIn(Border card)
+    {
+        var fade = new DoubleAnimation(0, 1, new Duration(TimeSpan.FromMilliseconds(220))) { EasingFunction = SoftEase };
+
+        // Hand the value back, or a held animation on Opacity outranks the dim a drag applies.
+        fade.Completed += (_, _) =>
+        {
+            card.BeginAnimation(OpacityProperty, null);
+            card.Opacity = 1;
+        };
+
+        card.BeginAnimation(OpacityProperty, fade);
+
+        var rise = new TranslateTransform();
+        card.RenderTransform = rise;
+        rise.BeginAnimation(TranslateTransform.YProperty,
+            new DoubleAnimation(8, 0, new Duration(TimeSpan.FromMilliseconds(260))) { EasingFunction = OutEase });
+    }
+
     // ===== View state =====
 
     private void UpdateEditorHeader() =>
@@ -1356,7 +2204,8 @@ public partial class NotesView : UserControl
             ? Visibility.Visible
             : Visibility.Collapsed;
 
-        var bodyEmpty = _activeNote != null
+        // A prompt note's cards carry their own placeholder; the document one would sit behind them.
+        var bodyEmpty = _activeNote is { IsPrompt: false }
                         && ReadPlainText().Length == 0
                         && !DocumentImages(Editor.Document).Any();
 

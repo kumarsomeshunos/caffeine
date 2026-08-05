@@ -79,6 +79,87 @@
             </Setter>
         </Style>
 
+        <!-- Copy and delete on a prompt card. The card is already SurfaceColor, so these start
+             transparent and take SurfaceHover on hover rather than the other way round — a
+             SurfaceColor button on a SurfaceColor card would be invisible. -->
+        <Style x:Key="PromptCardButtonStyle" TargetType="Button" BasedOn="{StaticResource PoppingButton}">
+            <Setter Property="Width" Value="28"/>
+            <Setter Property="Height" Value="28"/>
+            <Setter Property="Margin" Value="2,0,0,0"/>
+            <Setter Property="VerticalAlignment" Value="Top"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="Button">
+                        <Border x:Name="Bg" Background="Transparent" CornerRadius="14">
+                            <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter TargetName="Bg" Property="Background" Value="{DynamicResource SurfaceHover}"/>
+                                <Trigger.EnterActions>
+                                    <BeginStoryboard>
+                                        <Storyboard>
+                                            <DoubleAnimation Storyboard.TargetProperty="RenderTransform.ScaleX"
+                                                             To="1.12" Duration="0:0:0.15"
+                                                             EasingFunction="{StaticResource BubbleEase}"/>
+                                            <DoubleAnimation Storyboard.TargetProperty="RenderTransform.ScaleY"
+                                                             To="1.12" Duration="0:0:0.15"
+                                                             EasingFunction="{StaticResource BubbleEase}"/>
+                                        </Storyboard>
+                                    </BeginStoryboard>
+                                </Trigger.EnterActions>
+                                <Trigger.ExitActions>
+                                    <BeginStoryboard>
+                                        <Storyboard>
+                                            <DoubleAnimation Storyboard.TargetProperty="RenderTransform.ScaleX"
+                                                             To="1" Duration="0:0:0.2"
+                                                             EasingFunction="{StaticResource BubbleEase}"/>
+                                            <DoubleAnimation Storyboard.TargetProperty="RenderTransform.ScaleY"
+                                                             To="1" Duration="0:0:0.2"
+                                                             EasingFunction="{StaticResource BubbleEase}"/>
+                                        </Storyboard>
+                                    </BeginStoryboard>
+                                </Trigger.ExitActions>
+                            </Trigger>
+                            <Trigger Property="IsPressed" Value="True">
+                                <Trigger.EnterActions>
+                                    <BeginStoryboard>
+                                        <Storyboard>
+                                            <DoubleAnimation Storyboard.TargetProperty="RenderTransform.ScaleX"
+                                                             To="0.9" Duration="0:0:0.08"/>
+                                            <DoubleAnimation Storyboard.TargetProperty="RenderTransform.ScaleY"
+                                                             To="0.9" Duration="0:0:0.08"/>
+                                        </Storyboard>
+                                    </BeginStoryboard>
+                                </Trigger.EnterActions>
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
+        <!-- The Undo affordance on the delete toast -->
+        <Style x:Key="PromptQuietButtonStyle" TargetType="Button">
+            <Setter Property="Cursor" Value="Hand"/>
+            <Setter Property="Foreground" Value="{DynamicResource NotesAccent}"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="Button">
+                        <Border x:Name="Bg" Background="Transparent" CornerRadius="8" Padding="9,4">
+                            <TextBlock Text="{TemplateBinding Content}" FontFamily="Segoe UI" FontSize="12"
+                                       FontWeight="SemiBold" Foreground="{TemplateBinding Foreground}"/>
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter TargetName="Bg" Property="Background" Value="{DynamicResource SurfaceHover}"/>
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
         <!-- Dialog buttons -->
         <Style x:Key="DangerButtonStyle" TargetType="Button" BasedOn="{StaticResource PoppingButton}">
             <Setter Property="Template">
@@ -248,8 +329,9 @@
             <Setter Property="Padding" Value="0"/>
             <Setter Property="HorizontalContentAlignment" Value="Stretch"/>
             <!-- The template has no ContentPresenter, so nothing inside it reaches the automation
-                 tree. Name the row explicitly or a screen reader reads out the type name. -->
-            <Setter Property="AutomationProperties.Name" Value="{Binding DisplayTitle}"/>
+                 tree — the P badge and the sent count included. Name the row explicitly or a
+                 screen reader reads out the type name. -->
+            <Setter Property="AutomationProperties.Name" Value="{Binding AccessibleLabel}"/>
             <Setter Property="Template">
                 <Setter.Value>
                     <ControlTemplate TargetType="ListBoxItem">
@@ -260,14 +342,24 @@
                             <StackPanel>
                                 <Grid>
                                     <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="Auto"/>
                                         <ColumnDefinition Width="*"/>
                                         <ColumnDefinition Width="Auto"/>
                                     </Grid.ColumnDefinitions>
-                                    <TextBlock x:Name="RowTitle" Grid.Column="0" Text="{Binding DisplayTitle}"
+                                    <!-- The tag that says this note is a prompt set rather than a
+                                         document. Shown only on prompt notes. -->
+                                    <Border x:Name="PromptBadge" Grid.Column="0" Visibility="Collapsed"
+                                            Background="{DynamicResource NotesAccent}" CornerRadius="4"
+                                            Padding="4,0,4,1" Margin="0,1,6,0" VerticalAlignment="Top">
+                                        <TextBlock x:Name="PromptBadgeText" Text="P"
+                                                   FontFamily="Segoe UI" FontSize="9.5" FontWeight="Bold"
+                                                   Foreground="{DynamicResource NotesSelectionText}"/>
+                                    </Border>
+                                    <TextBlock x:Name="RowTitle" Grid.Column="1" Text="{Binding DisplayTitle}"
                                                FontFamily="Segoe UI" FontSize="13" FontWeight="SemiBold"
                                                Foreground="{DynamicResource PrimaryText}"
                                                TextTrimming="CharacterEllipsis"/>
-                                    <Path x:Name="PinGlyph" Grid.Column="1" Visibility="Collapsed"
+                                    <Path x:Name="PinGlyph" Grid.Column="2" Visibility="Collapsed"
                                           Data="M5,0.8 A2.1,2.1 0 1,1 5,5 A2.1,2.1 0 1,1 5,0.8 M5,5 V10.5"
                                           Stroke="{DynamicResource NotesAccent}" StrokeThickness="1.5"
                                           Fill="{DynamicResource NotesAccent}"
@@ -279,14 +371,24 @@
                                            Foreground="{DynamicResource SecondaryText}"
                                            TextWrapping="Wrap" MaxHeight="34"
                                            TextTrimming="CharacterEllipsis" Margin="0,2,0,0"/>
-                                <TextBlock x:Name="RowTime" Text="{Binding TimeLabel}"
-                                           FontFamily="Segoe UI" FontSize="11"
-                                           Foreground="{DynamicResource SecondaryText}" Margin="0,4,0,0"/>
+                                <StackPanel Orientation="Horizontal" Margin="0,4,0,0">
+                                    <TextBlock x:Name="RowTime" Text="{Binding TimeLabel}"
+                                               FontFamily="Segoe UI" FontSize="11"
+                                               Foreground="{DynamicResource SecondaryText}"/>
+                                    <TextBlock x:Name="RowPromptCount" Visibility="Collapsed"
+                                               Text="{Binding PromptCountLabel, StringFormat=· {0}}"
+                                               FontFamily="Segoe UI" FontSize="11" Margin="6,0,0,0"
+                                               Foreground="{DynamicResource SecondaryText}"/>
+                                </StackPanel>
                             </StackPanel>
                         </Border>
                         <ControlTemplate.Triggers>
                             <DataTrigger Binding="{Binding Pinned}" Value="True">
                                 <Setter TargetName="PinGlyph" Property="Visibility" Value="Visible"/>
+                            </DataTrigger>
+                            <DataTrigger Binding="{Binding IsPrompt}" Value="True">
+                                <Setter TargetName="PromptBadge" Property="Visibility" Value="Visible"/>
+                                <Setter TargetName="RowPromptCount" Property="Visibility" Value="Visible"/>
                             </DataTrigger>
                             <MultiTrigger>
                                 <MultiTrigger.Conditions>
@@ -299,8 +401,13 @@
                                 <Setter TargetName="RowTitle" Property="Foreground" Value="{DynamicResource NotesSelectionText}"/>
                                 <Setter TargetName="RowPreview" Property="Foreground" Value="{DynamicResource NotesSelectionSubtext}"/>
                                 <Setter TargetName="RowTime" Property="Foreground" Value="{DynamicResource NotesSelectionSubtext}"/>
+                                <Setter TargetName="RowPromptCount" Property="Foreground" Value="{DynamicResource NotesSelectionSubtext}"/>
                                 <Setter TargetName="PinGlyph" Property="Stroke" Value="{DynamicResource NotesSelectionText}"/>
                                 <Setter TargetName="PinGlyph" Property="Fill" Value="{DynamicResource NotesSelectionText}"/>
+                                <!-- An amber badge on the amber selection fill would vanish, so it
+                                     inverts along with everything else on the row. -->
+                                <Setter TargetName="PromptBadge" Property="Background" Value="{DynamicResource NotesSelectionText}"/>
+                                <Setter TargetName="PromptBadgeText" Property="Foreground" Value="{DynamicResource NotesSelectionFill}"/>
                             </Trigger>
                         </ControlTemplate.Triggers>
                     </ControlTemplate>
@@ -534,6 +641,16 @@
                                 Style="{StaticResource ToolIconButtonStyle}" ToolTip="New note (Ctrl+N)">
                             <Path Data="M7,1.5 V12.5 M1.5,7 H12.5" Stroke="{DynamicResource NotesAccent}"
                                   StrokeThickness="1.8" StrokeStartLineCap="Round" StrokeEndLineCap="Round"/>
+                        </Button>
+                        <!-- The same act as New note, but the note it makes holds a queue of
+                             prompts instead of a document. -->
+                        <Button x:Name="NewPromptButton" Click="NewPrompt_Click"
+                                Style="{StaticResource ToolIconButtonStyle}"
+                                ToolTip="New prompt set (Ctrl+Shift+P)">
+                            <Path Data="M4.5,12.5 V1.5 H8 A3,3 0 0,1 8,7.5 H4.5"
+                                  Stroke="{DynamicResource NotesAccent}" StrokeThickness="1.8"
+                                  StrokeStartLineCap="Round" StrokeEndLineCap="Round"
+                                  StrokeLineJoin="Round"/>
                         </Button>
                         <Button x:Name="PinButton" Click="TogglePin_Click"
                                 Style="{StaticResource ToolIconButtonStyle}" ToolTip="Pin or unpin">
@@ -805,6 +922,19 @@
                                     </Style>
                                 </RichTextBox.Resources>
                             </RichTextBox>
+
+                            <!-- A prompt note's body: a queue of prompts rather than a document.
+                                 The cards are built in code (see RebuildPrompts) because a card
+                                 changes shape with its state and can be dragged — the same
+                                 reasoning that keeps Todo's rows out of a template. -->
+                            <Grid x:Name="PromptSurface" Visibility="Collapsed">
+                                <ScrollViewer x:Name="PromptScroll" Focusable="False"
+                                              VerticalScrollBarVisibility="Auto"
+                                              HorizontalScrollBarVisibility="Disabled"
+                                              PreviewMouseWheel="SmoothScroll_MouseWheel">
+                                    <StackPanel x:Name="PromptStack" Margin="24,2,24,26"/>
+                                </ScrollViewer>
+                            </Grid>
                         </Grid>
                     </Grid>
 
@@ -843,6 +973,24 @@
             </Border.Effect>
             <TextBlock x:Name="ErrorText" Text="" FontFamily="Segoe UI" FontSize="12" Foreground="White"
                        TextWrapping="Wrap"/>
+        </Border>
+
+        <!-- ========== PROMPT DELETE UNDO ========== -->
+        <!-- Deleting a prompt is undoable rather than confirmed, the way deleting a task is: a
+             prompt is cheap to retype and expensive to be interrupted over. -->
+        <Border x:Name="PromptUndoToast" Background="{DynamicResource SurfaceColor}" CornerRadius="10"
+                Padding="14,8" Margin="16,0,16,16" Panel.ZIndex="16"
+                HorizontalAlignment="Center" VerticalAlignment="Bottom" Visibility="Collapsed">
+            <Border.Effect>
+                <DropShadowEffect ShadowDepth="2" BlurRadius="16" Opacity="0.3"/>
+            </Border.Effect>
+            <StackPanel Orientation="Horizontal">
+                <TextBlock Text="Prompt deleted" VerticalAlignment="Center"
+                           FontFamily="Segoe UI" FontSize="12"
+                           Foreground="{DynamicResource PrimaryText}"/>
+                <Button Content="Undo" Click="PromptUndo_Click" Margin="14,0,0,0"
+                        Style="{StaticResource PromptQuietButtonStyle}"/>
+            </StackPanel>
         </Border>
 
         <!-- ========== PICTURE VIEWER ========== -->
