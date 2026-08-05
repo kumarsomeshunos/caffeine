@@ -4,7 +4,7 @@ All notable changes to Caffeine are recorded here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project uses
 [semantic versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [2.1.0] — 2026-08-05
 
 ### Added
 
@@ -22,6 +22,12 @@ All notable changes to Caffeine are recorded here. The format follows
   failed to open
 - Prompt sets are notes throughout — pin, search (prompt text is indexed), duplicate, and the 30-day
   Recently Deleted bin all work on them unchanged
+
+### Fixed
+
+- A search that filtered the open note out of the list discarded the previous 600 ms of typing.
+  `SyncActiveNoteToSelection` changes the active note without going through `LeaveActiveNote`, and
+  did not commit first — this affected ordinary notes as well as prompt sets
 
 ## [2.0.0] — 2026-07-30
 
@@ -104,6 +110,7 @@ still runs from one self-contained executable with no dependencies and no networ
 - `ScrollingTextBlock`, the odometer-style per-character text animation
 - Start with Windows, MIT license, contributing guide, CI workflow and issue templates
 
+[2.1.0]: https://github.com/kumarsomeshunos/caffeine/releases/tag/v2.1.0
 [2.0.0]: https://github.com/kumarsomeshunos/caffeine/releases/tag/v2.0.0
 [1.1.0]: https://github.com/kumarsomeshunos/caffeine/releases/tag/v1.1.0
 [1.0.0]: https://github.com/kumarsomeshunos/caffeine/releases/tag/v1.0.0
